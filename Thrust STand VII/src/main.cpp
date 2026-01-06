@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <U8g2lib.h>
+#include <Wire.h>
 
 //-----------------------------------------MENU FUNCTIONS--------------------------------------
 /*
@@ -23,6 +25,7 @@ MAIN MENU
                 2124 Up/Down Mode (Just up or up and down)
         22 Test Setup Selection
             221 RPM Marker Count
+            222 Test File Name
 
     3 Tare Sensors
         // Tare Torque
@@ -38,6 +41,7 @@ MAIN MENU
         Display read values for all sensors,
 */
 
+/*
 enum ItemType { SUBMENU, TOGGLE, VALUE, ACTION };
 
 //this defines the different types of menu items you can have.
@@ -55,13 +59,22 @@ MenuItem menus[] = {
     {2, "Configure Test", SUBMENU, 0, NULL, NULL},
     {21, "Test Profile Selection", SUBMENU, 2, NULL, NULL},
 };
+*/
 
-void runTest() {
-    serial.print("Test running")
-}
+// SSD1309, 128x64, I2C
+U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(
+    U8G2_R0,
+    U8X8_PIN_NONE
+);
+
 void setup() {
-
+    u8g2.begin();
 }
 
 void loop() {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_ncenB08_tr);
+    u8g2.drawStr(0, 12, "SSD1309 Works!");
+    u8g2.sendBuffer();
+    delay(1000);
 }
