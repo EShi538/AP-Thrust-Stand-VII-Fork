@@ -235,20 +235,24 @@ void drawLoadingScreen(int loadPercent){
 }
 
 void setup() {
-    u8g2.begin();
+    /*u8g2.begin();
     for (int i = 0; i < 20; i++){
         drawLoadingScreen(i*5);
     }
+        */
+    Serial.begin(9600); // Start serial communication
+    Serial.println("Keypad Ready");
 }
 
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
 void loop() { 
-    drawMenu(currentMenuId);
-    delay(5000);
-    drawLoadingScreen(0);
-    delay(5000);
+    //u8g2.clearBuffer();
+    //u8g2.setFont(u8g2_font_t0_13b_tr);
+    //drawMenu(currentMenuId);
+    Serial.println("c");
+    
     //executeMenu(3);
     /*int choice = 3; //get keypad input here
     int chosenId = getChosenMenuId(choice);
