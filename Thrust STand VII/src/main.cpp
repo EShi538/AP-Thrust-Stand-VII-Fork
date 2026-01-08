@@ -34,7 +34,7 @@ byte rowPins[ROWS] = {9, 8, 7, 6}; // Adjust these if your wiring is different
 byte colPins[COLS] = {5, 4, 3, 2}; // Adjust these if your wiring is different
 
 // Create the Keypad object
-Keypad customKeypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS)
+Keypad customKeypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
 
 
 //---------------------------------------SCREEN AND MENU--------------------------------------
@@ -256,10 +256,4 @@ void loop() {
         executeMenu(chosenId);
     }*/
     
-    /*
-    u8g2.clearBuffer(); //prepare the screen for writing
-    u8g2.setFont(u8g2_font_6x12_tr); //set big font for parent menu
-    u8g2.drawLine(0, 10, 128, 10); //draw line across bottom
-    u8g2.sendBuffer();
-    */
 }
