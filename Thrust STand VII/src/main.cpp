@@ -85,10 +85,10 @@ MENU FLOW CHART:
 
     4 Debug Menu
         Display read values for all sensors,
+
+
+
 */
-
-
-
 enum ItemType { TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION };
 
 struct MenuItem {
@@ -235,11 +235,11 @@ void drawLoadingScreen(int loadPercent){
 }
 
 void setup() {
-    /*u8g2.begin();
+    u8g2.begin();
     for (int i = 0; i < 20; i++){
         drawLoadingScreen(i*5);
     }
-        */
+
     Serial.begin(9600); // Start serial communication
     Serial.println("Keypad Ready");
 }
