@@ -19,6 +19,7 @@ bool upDown = true; //if true, go up and then back down
 const byte ROWS = 4; //four rows
 const byte COLS = 4; //four columns
 
+
 // Define the key mapping based on your keypad's layout
 char keys[ROWS][COLS] = {
   {'1','2','3','A'},
@@ -28,14 +29,13 @@ char keys[ROWS][COLS] = {
 };
 
 // Connect the row pins to the Arduino digital pins
-byte rowPins[ROWS] = {9, 8, 7, 6}; // Adjust these if your wiring is different
+byte rowPins[ROWS] = {12, 11, 10, 9}; // Adjust these if your wiring is different
 
 // Connect the column pins to the Arduino digital pins
-byte colPins[COLS] = {5, 4, 3, 2}; // Adjust these if your wiring is different
+byte colPins[COLS] = {8, 7, 6, 5}; // Adjust these if your wiring is different
 
 // Create the Keypad object
 Keypad customKeypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
-
 
 //---------------------------------------SCREEN AND MENU--------------------------------------
 //this is the magic that makes the screen work. Screen needs to be hooked up to SDA and SCL
@@ -46,7 +46,7 @@ U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(
 );
 
 //UW Logo
-static const unsigned char image_download_bits[] = {0xa0,0x00,0x00,0x00,0x00,0x80,0x07,0x00,0x00,0x00,0x04,0x3e,0x00,0x00,0x00,0xf8,0xf8,0x00,0x00,0x00,0xc0,0xe3,0x43,0x01,0x00,0x0f,0xdf,0xff,0x03,0x00,0x7c,0xfc,0xff,0x01,0x00,0xe0,0xf9,0xff,0x01,0x00,0x80,0xef,0x7f,0x02,0x00,0x00,0xff,0x3f,0x00,0x00,0x00,0xfe,0x7f,0x40,0x00,0x00,0xfc,0x7f,0x80,0x00,0x00,0xf8,0x07,0x04,0x02,0x00,0x20,0x08,0x10,0x04,0x00,0x00,0x00,0x40,0x08,0x00,0x00,0x00,0x82,0x10,0x00,0x00,0x00,0x04,0x21,0x00,0x00,0x00,0x10,0x22,0x00,0x00,0x00,0x20,0x24,0x00,0x00,0x00,0x40,0x0c,0x00,0x00,0x00,0xc0,0x07,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0xa0,0x00,0x00,0x00,0xaa,0x8a,0x00,0x00,0x00,0x00,0x30,0x00,0x00,0x00,0xd0,0x03,0x00};
+
 
 
 //-----------------------------------------MENU FUNCTIONS--------------------------------------
@@ -89,7 +89,7 @@ MENU FLOW CHART:
 
 
 */
-enum ItemType { TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION };
+enum ItemType { TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION};
 
 struct MenuItem {
     int itemId;
@@ -106,17 +106,17 @@ MenuItem menus[] = {
     {0, "Main Menu", TYPE_SUBMENU, 1000, NULL, NULL},
 
     {1, "Run Test", TYPE_ACTION, 0, NULL, NULL},
-
+    
     {2, "Configure Test", TYPE_SUBMENU, 0, NULL, NULL},
-        {21, "Select Test Profile", TYPE_ACTION, 2, NULL, NULL},
+   
+    {3, "Select Test Profile", TYPE_ACTION, 0, NULL, NULL},
         {22, "Configure Test Profiles", TYPE_SUBMENU, 2, NULL, NULL},
             {221, "Smooth Ramp", TYPE_SUBMENU, 22, NULL, NULL},
-                {2211, "Ramp Time", TYPE_VALUE, 22, &rampTime, NULL},
-                {2212, "Top Time", TYPE_VALUE, 22,},
+                {2211, "Ramp Time", TYPE_VALUE, 22, NULL, NULL},
+                {2212, "Top Time", TYPE_VALUE, 22, NULL, NULL},
             {222, "Interval Ramp", TYPE_SUBMENU, 22, NULL, NULL},
         {23, "Test Setup Selection", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, NULL, NULL},
-
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {31, "Zero All", TYPE_ACTION, 3, NULL, NULL},
         {32, "Tare Torque", TYPE_ACTION, 3, NULL, NULL},
@@ -126,7 +126,6 @@ MenuItem menus[] = {
         {36, "Zero Analog", TYPE_ACTION, 3, NULL, NULL},
 
     {4, "Debug", TYPE_ACTION, 0, NULL, NULL},
-
     //TARE SENSORS
 
 
@@ -138,10 +137,10 @@ MenuItem menus[] = {
 //in a struct datatype is hard I guess
 int menuCount = sizeof(menus)/sizeof(menus[0]);
 int currentMenuId = 0; //this keeps track of the current menu state
+
+
 //returns null if no Menu Item with that ID, otherwise returns a pointer
 //to the item.
-
-
 MenuItem* getMenu(int menuId) {
     for (int i = 0; i < menuCount; i++) {
         if (menus[i].itemId == menuId) {
@@ -214,7 +213,9 @@ void executeMenu(int targetMenuId) {
 void drawLoadingScreen(int loadPercent){
     u8g2.clearBuffer();
 
-    u8g2.drawXBM(85, 25, 38, 26, image_download_bits);
+    //UW Logo
+    //static const unsigned char image_download_bits[] = {0xa0,0x00,0x00,0x00,0x00,0x80,0x07,0x00,0x00,0x00,0x04,0x3e,0x00,0x00,0x00,0xf8,0xf8,0x00,0x00,0x00,0xc0,0xe3,0x43,0x01,0x00,0x0f,0xdf,0xff,0x03,0x00,0x7c,0xfc,0xff,0x01,0x00,0xe0,0xf9,0xff,0x01,0x00,0x80,0xef,0x7f,0x02,0x00,0x00,0xff,0x3f,0x00,0x00,0x00,0xfe,0x7f,0x40,0x00,0x00,0xfc,0x7f,0x80,0x00,0x00,0xf8,0x07,0x04,0x02,0x00,0x20,0x08,0x10,0x04,0x00,0x00,0x00,0x40,0x08,0x00,0x00,0x00,0x82,0x10,0x00,0x00,0x00,0x04,0x21,0x00,0x00,0x00,0x10,0x22,0x00,0x00,0x00,0x20,0x24,0x00,0x00,0x00,0x40,0x0c,0x00,0x00,0x00,0xc0,0x07,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0xa0,0x00,0x00,0x00,0xaa,0x8a,0x00,0x00,0x00,0x00,0x30,0x00,0x00,0x00,0xd0,0x03,0x00};
+    //u8g2.drawXBM(85, 25, 38, 26, image_download_bits);
 
     u8g2.setFont(u8g2_font_t0_13b_tr);
     u8g2.drawStr(3, 14, "Design Build Fly");
@@ -224,11 +225,12 @@ void drawLoadingScreen(int loadPercent){
 
     u8g2.drawStr(90, 60, "2025-26");
 
-    u8g2.drawRFrame(2, 30, 80, 21, 3); //loading bar frame
+    u8g2.drawRFrame(2, 30, 126, 21, 3); //loading bar frame
 
-    u8g2.drawRBox(2, 30, ((80-6)*loadPercent/100)+6, 21, 3); //loading bar fill in
+    u8g2.drawRBox(2, 30, ((126-6)*loadPercent/100)+6, 21, 3); //loading bar fill in
 
     u8g2.drawStr(2, 60, "Version 0.1");
+
 
     u8g2.sendBuffer();
 
@@ -236,22 +238,28 @@ void drawLoadingScreen(int loadPercent){
 
 void setup() {
     u8g2.begin();
+    Serial.begin(9600); // Start serial communication
+    Serial.println("Keypad Ready");
+
     for (int i = 0; i < 20; i++){
         drawLoadingScreen(i*5);
     }
 
-    Serial.begin(9600); // Start serial communication
-    Serial.println("Keypad Ready");
+
 }
 
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
 void loop() { 
-    //u8g2.clearBuffer();
-    //u8g2.setFont(u8g2_font_t0_13b_tr);
-    //drawMenu(currentMenuId);
-    Serial.println("c");
+    drawMenu(currentMenuId);
+    // Check for a pressed key
+    //char userInput = customKeypad.getKey();
+    // If a key is pressed, print it to the Serial Monitor
+    //if (userInput) {
+     //   Serial.println(userInput);
+    //}
+    
     
     //executeMenu(3);
     /*int choice = 3; //get keypad input here
