@@ -108,15 +108,15 @@ MenuItem menus[] = {
     {1, "Run Test", TYPE_ACTION, 0, NULL, NULL},
     
     {2, "Configure Test", TYPE_SUBMENU, 0, NULL, NULL},
-   
-    {3, "Select Test Profile", TYPE_ACTION, 0, NULL, NULL},
-        {22, "Configure Test Profiles", TYPE_SUBMENU, 2, NULL, NULL},
-            {221, "Smooth Ramp", TYPE_SUBMENU, 22, NULL, NULL},
-                {2211, "Ramp Time", TYPE_VALUE, 22, NULL, NULL},
-                {2212, "Top Time", TYPE_VALUE, 22, NULL, NULL},
-            {222, "Interval Ramp", TYPE_SUBMENU, 22, NULL, NULL},
-        {23, "Test Setup Selection", TYPE_SUBMENU, 2, NULL, NULL},
+        {21, "Select Profile", TYPE_ACTION, 2, NULL, NULL},
+        {22, "Configure Profiles", TYPE_SUBMENU, 2, NULL, NULL},
+            {221, "Smooth", TYPE_SUBMENU, 22, NULL, NULL},
+                {2211, "Ramp Up Time", TYPE_VALUE, 221, NULL, NULL},
+                {2212, "Top Hold Time", TYPE_VALUE, 221, NULL, NULL},
+            {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
+        {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, NULL, NULL},
+
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {31, "Zero All", TYPE_ACTION, 3, NULL, NULL},
         {32, "Tare Torque", TYPE_ACTION, 3, NULL, NULL},
@@ -170,20 +170,22 @@ void drawMenu(int menuId) {
             MenuItem* subMenu = getMenu(menus[i].itemId); //grab the menu item pointer (this is like super bad and slow but it works!)
 
             u8g2.setCursor(4, 12 + menusDrawn*menuOffset);
-            u8g2.print(menusDrawn);
-            u8g2.drawStr(12, 12 + menusDrawn*menuOffset, subMenu->label);
+            u8g2.print(menusDrawn); //this prints the option number
+            u8g2.drawStr(12, 12 + menusDrawn*menuOffset, subMenu->label); //this prints the name of the menu
 
             menusDrawn++; //increment the counter so we draw the next one lower
         }
     }
+
+    u8g2.drawStr(4, 63, "Back: *");
     u8g2.sendBuffer();
 }
 
 int getChosenMenuId(int choice) { //given an the int of the choice (1 index), then it will find the chosen menu Id. If the choice is invalid, then returns -1
 
-    //fetch that menus pointer
+    //fetch that menus pointer by going through the all of the options and counting down by the chosen number.
     for (int i = 0; i < menuCount; i++) {
-        if (menus[i].parentId == currentMenuId) {
+        if (menus[i].parentId == currentMenuId) { 
             if (choice == 1) {
                 return menus[i].itemId;
             } else if (choice < 1){
@@ -196,15 +198,27 @@ int getChosenMenuId(int choice) { //given an the int of the choice (1 index), th
     return -1;
 }
 
+void changeInt(int* value, const char label){
+    if (!value){
+        return;
+    }
+
+    
+}
 void executeMenu(int targetMenuId) {
-    MenuItem targetMenu = menus[targetMenuId];
+    MenuItem targetMenu = *getMenu(targetMenuId);
     if (targetMenu.type == TYPE_SUBMENU) {
+        Serial.println("Submenu Type!");
+        Serial.print(targetMenu.label);
         currentMenuId = targetMenuId; //navigate the submenu if it's a submenu item
     } else if (targetMenu.type == TYPE_ACTION) {
-        targetMenu.action(); //call the function if it's a function menu item
+        Serial.println("Action Type!"); 
+            //targetMenu.action(); //all the function if it's a function menu item
     } else if (targetMenu.type == TYPE_VALUE) {
+        Serial.println("Value Type!");
         //write value change function here
     } else if (targetMenu.type == TYPE_TOGGLE) {
+        Serial.println("Toggle Type!");
         //write bool change function here
     }
 }
@@ -253,19 +267,37 @@ void setup() {
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
 void loop() { 
     drawMenu(currentMenuId);
-    // Check for a pressed key
-    //char userInput = customKeypad.getKey();
+    
+    //wait for the user to press a key
+    char userInput = customKeypad.getKey();
+    
     // If a key is pressed, print it to the Serial Monitor
-    //if (userInput) {
-     //   Serial.println(userInput);
-    //}
-    
-    
-    //executeMenu(3);
-    /*int choice = 3; //get keypad input here
-    int chosenId = getChosenMenuId(choice);
-    if (chosenId) {
-        executeMenu(chosenId);
-    }*/
+    if (userInput) {
+        Serial.println(userInput);
+
+        //check to see if the key is a number, if it is then save the number as "value"
+        if (userInput >= '0' && userInput <= '9') {
+            int choice = userInput - '0';
+            choice = getChosenMenuId(choice); //this turns choice from the number option of 1-9 that the user picked, to the id of the chosen menu. It will return -1 if invalid
+            Serial.println(choice);
+
+            //if the choice is valid, execute that menu item
+            if (choice != -1){
+                executeMenu(choice);
+            }
+        
+        //asterisk is the back button
+        } else if (userInput == '*') {
+            Serial.println("Go back");
+            if (currentMenuId != 0){ //you can't go back from the main menu!
+                currentMenuId = menus[currentMenuId].parentId; //if the user presses the back button, go back to the parent.
+            }
+
+        }
+
+        Serial.print("Active ID is now: ");
+        Serial.println(currentMenuId);
+
+    }
     
 }
