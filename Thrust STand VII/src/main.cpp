@@ -89,7 +89,7 @@ MENU FLOW CHART:
 
 
 */
-enum ItemType { TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION};
+enum ItemType {TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION};
 
 struct MenuItem {
     int itemId; //keep an eye on this, it could int overflow
@@ -115,7 +115,7 @@ MenuItem menus[] = {
                 {2212, "Top Hold Time (s)", TYPE_VALUE, 221, &topTime, NULL},
             {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
-            {231, "RPM Marker Count", TYPE_VALUE, 23, NULL, NULL},
+            {231, "RPM Marker Count", TYPE_VALUE, 23, &rpmMarkers, NULL},
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {31, "Zero All", TYPE_ACTION, 3, NULL, NULL},
@@ -150,8 +150,7 @@ MenuItem* getMenu(int menuId) {
     return nullptr; //returns null if there's no menu with that ID
 }
 
-
-void drawMenu(int menuId) {
+void drawMenu(int menuId) { //pass the ID of the parent menu. Will fetch all submenus and display them
     u8g2.clearBuffer(); //prepare the screen for writing
     u8g2.setFont(u8g2_font_6x12_tr); //set big font for parent menu
 
@@ -172,6 +171,17 @@ void drawMenu(int menuId) {
             u8g2.setCursor(4, 12 + menusDrawn*menuOffset);
             u8g2.print(menusDrawn); //this prints the option number
             u8g2.drawStr(12, 12 + menusDrawn*menuOffset, subMenu->label); //this prints the name of the menu
+
+            if (subMenu->type == TYPE_VALUE) { //if the value exists and isn't a null pointer, print it at the end
+                Serial.print("Menu item is a value");
+                if (subMenu->variable != nullptr){
+                    Serial.print("Menu item has value assigned");
+                    u8g2.setCursor(95, 12 + menusDrawn*menuOffset);
+                    u8g2.print("= ");
+                    u8g2.print(*(subMenu->variable));
+                }
+            }
+
 
             menusDrawn++; //increment the counter so we draw the next one lower
         }
