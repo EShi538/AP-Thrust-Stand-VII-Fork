@@ -6,12 +6,12 @@
 //-----------------------------------------GLOBAL VARIABLES-----------------------------------
 
 //test setup
-int rpmMarkers = 1;
-int testNumber = 1;
+long rpmMarkers = 1;
+long testNumber = 1;
 //smooth ramp
-int rampTime = 30; //in seconds
-int topTime = 4; //in seconds
-int smoothThrottleMax = 100; //as a percent
+long rampTime = 30; //in seconds
+long topTime = 4; //in seconds
+long smoothThrottleMax = 100; //as a percent
 bool upDown = true; //if true, go up and then back down
 
 
@@ -92,11 +92,11 @@ MENU FLOW CHART:
 enum ItemType { TYPE_SUBMENU, TYPE_TOGGLE, TYPE_VALUE, TYPE_ACTION};
 
 struct MenuItem {
-    int itemId;
+    int itemId; //keep an eye on this, it could int overflow
     const char* label;
     ItemType type;
     int parentId;
-    int* variable;
+    long* variable;
     void (*action)();
 };
 
@@ -198,7 +198,7 @@ int getChosenMenuId(int choice) { //given an the int of the choice (1 index), th
     return -1;
 }
 
-void valueEditMenu(int* value, const char* label){ //pass this method a pointer to an int and a label to show for the int. It will give the user the UI to type in any positive integer of 8 digits or less.
+void valueEditMenu(long* value, const char* label){ //pass this method a pointer to an int and a label to show for the int. It will give the user the UI to type in any positive integer of 8 digits or less.
     Serial.println("Inside value edit menu!");
     if (!value){
         Serial.println("value doesn't exist, returning");
