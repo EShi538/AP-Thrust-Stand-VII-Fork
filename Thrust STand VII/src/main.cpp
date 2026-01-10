@@ -96,7 +96,7 @@ struct MenuItem {
     const char* label;
     ItemType type;
     int parentId;
-    void* variable;
+    int* variable;
     void (*action)();
 };
 
@@ -111,8 +111,8 @@ MenuItem menus[] = {
         {21, "Select Profile", TYPE_ACTION, 2, NULL, NULL},
         {22, "Configure Profiles", TYPE_SUBMENU, 2, NULL, NULL},
             {221, "Smooth", TYPE_SUBMENU, 22, NULL, NULL},
-                {2211, "Ramp Up Time", TYPE_VALUE, 221, NULL, NULL},
-                {2212, "Top Hold Time", TYPE_VALUE, 221, NULL, NULL},
+                {2211, "Ramp Up Time (s)", TYPE_VALUE, 221, &rampTime, NULL},
+                {2212, "Top Hold Time (s)", TYPE_VALUE, 221, &topTime, NULL},
             {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, NULL, NULL},
@@ -198,25 +198,86 @@ int getChosenMenuId(int choice) { //given an the int of the choice (1 index), th
     return -1;
 }
 
-void changeInt(int* value, const char label){
+void valueEditMenu(int* value, const char* label){ //pass this method a pointer to an int and a label to show for the int. It will give the user the UI to type in any positive integer of 8 digits or less.
+    Serial.println("Inside value edit menu!");
     if (!value){
+        Serial.println("value doesn't exist, returning");
         return;
     }
 
+    int startTime = millis(); //we track how long since it started so that we can time out
+    Serial.print("Value is: "); Serial.println(*value);
+
+    //set up the input string
+    String input = String(*value);
+
+    while(1){
+        //set up for entry
+        u8g2.clearBuffer();
+        u8g2.setFontMode(1);
+        u8g2.setBitmapMode(1);
+        u8g2.setFont(u8g2_font_t0_12b_tr);
+        u8g2.drawStr(2, 11, label);
+        u8g2.drawLine(0, 13, 127, 13);
+        u8g2.setFont(u8g2_font_4x6_tr);
+        u8g2.drawStr(89, 51, "Accept: # ");
+        u8g2.drawStr(89, 57, "Delete: D");
+        u8g2.drawStr(89, 63, "Cancel: *");
+        u8g2.setFont(u8g2_font_t0_22b_tr);
+        
+        //print the input string
+        u8g2.setCursor(3, 40);
+        u8g2.print(input);
+
+        if ((millis()-startTime)/300 % 2 == 1){ //check time to do a cursor blink. Uses modulo to decide whethere it's an "even" or "odd" time
+            u8g2.print("|");
+        }
+        
+         //wait for the user to press a key
+        char userInput = customKeypad.getKey();
     
+        // If a key is pressed, print it to the Serial Monitor
+        if (userInput) {
+            Serial.println(userInput);
+
+            //check to see if the key is a number, if it is then we should put the number into the string
+            if (userInput >= '0' && userInput <= '9') {
+                if (input.length() < 8){ //make sure the number doesn't get too long for int overflow!
+                    input += userInput;
+                }
+
+            //asterisk is the cancel button
+            } else if (userInput == '*') {
+                Serial.println("Cancel");
+                return;
+            
+            //pound is the confirm button
+            } else if (userInput == '#') {
+                *value = input.toInt();
+                return;
+
+            //D is the delete button
+            } else if (userInput == 'D') {
+                if (input.length() > 0) {
+                    input.remove(input.length() - 1);
+                }
+            }
+        } 
+        u8g2.sendBuffer();
+    }
 }
+
 void executeMenu(int targetMenuId) {
     MenuItem targetMenu = *getMenu(targetMenuId);
     if (targetMenu.type == TYPE_SUBMENU) {
         Serial.println("Submenu Type!");
-        Serial.print(targetMenu.label);
         currentMenuId = targetMenuId; //navigate the submenu if it's a submenu item
     } else if (targetMenu.type == TYPE_ACTION) {
         Serial.println("Action Type!"); 
             //targetMenu.action(); //all the function if it's a function menu item
     } else if (targetMenu.type == TYPE_VALUE) {
         Serial.println("Value Type!");
-        //write value change function here
+        valueEditMenu(targetMenu.variable, targetMenu.label);
     } else if (targetMenu.type == TYPE_TOGGLE) {
         Serial.println("Toggle Type!");
         //write bool change function here
@@ -258,10 +319,7 @@ void setup() {
     for (int i = 0; i < 20; i++){
         drawLoadingScreen(i*5);
     }
-
-
 }
-
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
@@ -290,7 +348,7 @@ void loop() {
         } else if (userInput == '*') {
             Serial.println("Go back");
             if (currentMenuId != 0){ //you can't go back from the main menu!
-                currentMenuId = menus[currentMenuId].parentId; //if the user presses the back button, go back to the parent.
+                currentMenuId = getMenu(currentMenuId)->parentId; //if the user presses the back button, go back to the parent.
             }
 
         }
@@ -298,6 +356,5 @@ void loop() {
         Serial.print("Active ID is now: ");
         Serial.println(currentMenuId);
 
-    }
-    
+    } 
 }
