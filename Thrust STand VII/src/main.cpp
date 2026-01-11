@@ -6,7 +6,6 @@
 int menuCount = sizeof(menus)/sizeof(menus[0]);
 int currentMenuId = 0; //this keeps track of the current menu state
 
-
 //returns null if no Menu Item with that ID, otherwise returns a pointer
 //to the item.
 MenuItem* getMenu(int menuId) {
@@ -197,11 +196,11 @@ void setup() {
     drawLoadingScreen(0);
     Serial.println("Force Sensor Initialization");
     torqueSensor.begin(TRQ_DOUT, TRQ_CLK);
-    thrustSensor.begin(THST_DOUT, THST_CLK);
+    torqueSensor.set_gain(128);
 
-    for (int i = 0; i < 20; i++){
-        
-    }
+    thrustSensor.begin(THST_DOUT, THST_CLK);
+    torqueSensor.set_gain(128);
+
 }
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
