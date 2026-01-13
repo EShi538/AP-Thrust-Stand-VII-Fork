@@ -32,8 +32,10 @@ extern void runTest();
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //Test Variables;
-const int testDataInterval = 100; //in milliseconds
+const int testDataInterval = 200; //in milliseconds, the amount of time between sensor reading and data writing cycles
 
+float testStartTime = 0;
+float testTime = 0;
 float thrust = 0; //mN
 float torque = 0; //N.mm
 float airspeed = 0; //m/s
@@ -56,7 +58,7 @@ float systemEfficiency = 0; //0-100%
 const int SD_CS_PIN = 53;     // Change if your module uses a different CS
 File dataFile; //used for the arduino to write to
 const int flushPeriodMillis = 1000; //this is how often the arduino will flush (save to the SD card) while doing a test
-const long lastFlush = 0; 
+int lastFlush = 0; 
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -222,8 +224,6 @@ struct MenuItem {
     void (*action)();
 };
 
-
-
 // Use the renamed enum TYPE_ACTION to avoid conflicts
 MenuItem menus[] = {
     //MAIN MENU
@@ -257,6 +257,10 @@ MenuItem menus[] = {
 //in a struct datatype is hard I guess
 const int MENU_COUNT = sizeof(menus)/sizeof(menus[0]);
 int currentMenuId = 0; //this keeps track of the current menu state
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//UI FUNCTIONS
 
 MenuItem* getMenu(int menuId) {//returns null if no Menu Item with that ID, otherwise returns a pointer to the item
     for (int i = 0; i < MENU_COUNT; i++) {
@@ -451,6 +455,10 @@ void drawLoadingScreen(int loadPercent, const char* message){//pass load percent
 
 }
 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//LOAD CELL FUNCTIONS
+
 void tareLoadCell(HX711* loadCell) { //pass a load cell object, will take the user through taring the load cell
 
     //prompt the user to remove load from the load cell
@@ -474,15 +482,6 @@ void tareLoadCell(HX711* loadCell) { //pass a load cell object, will take the us
 
     loadCell->tare();
     delay(USER_NOTIF_DELAY);
-}
-
-void tareTorque(){
-    tareLoadCell(&torqueSensor);
-}
-
-void tareThrust(){
-    tareLoadCell(&thrustSensor);
-
 }
 
 void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and the unit string, and will take the user through calibration
@@ -581,6 +580,15 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
     pressKeyToContinue();
 }
 
+void tareTorque(){
+    tareLoadCell(&torqueSensor);
+}
+
+void tareThrust(){
+    tareLoadCell(&thrustSensor);
+
+}
+
 void calibrateTorque(){ //helper function for the menu, calls calibrateLoadCell
     calibrateLoadCell(&torqueSensor, TRQ_UNITS);
     EEPROM.put(TRQ_CAL_ADDRESS, torqueSensor.get_scale()); //write the scale to EEPROM
@@ -591,55 +599,17 @@ void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
     EEPROM.put(THST_CAL_ADDRESS, thrustSensor.get_scale()); //write the scale factor to EEPROM
 }
 
-bool setUpTestFile(){//call this function to set up the file with the correct headers. Returns true on a successful setup.
-    //ask user for test file
-    valueEditMenu(&testNumber, "Enter Test Number");
 
-    // Build filename: Test_Number_X.csv
-    char filename[20];
-    snprintf(filename, sizeof(filename), "Test_%d.csv", (int)testNumber); //the test name needs to be less than 8 characters before the .csv
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//ANALOG SENSOR FUNCTIONS
 
-    // Check if file already exists. If it does, prompt user to overwrite or not
-    if (SD.exists(filename)) {
-        u8g2.clearBuffer();
-        u8g2.setFont(u8g2_font_t0_14b_tr);
-        u8g2.drawStr(2, 15, "File Name Already");
-        u8g2.drawStr(2, 26, "In Use");
-        u8g2.setFont(u8g2_font_5x7_tr);
-        u8g2.drawStr(3, 55, "Cancel: *");
-        u8g2.drawStr(3, 47, "Overwrite: #");
-        u8g2.sendBuffer();
-
-        while(1){
-            //wait for the user to press a key
-            char userInput = customKeypad.getKey();
-            if (userInput == '#'){
-                SD.remove(filename); //delete the file
-                break; //if user choses to override, exit the loop
-            }
-            if (userInput == '*'){
-                return false; //if user picks cancel, then return false.
-            }
-        }
+float findAnalogOffset(float (*valueFunction)()){ //pass this a function that returns a value. It will take a bunch of samples and then calculate the offset from 0 and return it to you
+    const int N = 30; //number of iterations
+    float sum = 0;
+    for (int i = 0; i < 50; i++) {
+        sum = sum + valueFunction();
     }
-
-    // Create and open file
-    dataFile = SD.open(filename, FILE_WRITE);
-    if (!dataFile) {
-    Serial.println("Failed to create file!");
-    return false;
-    }
-
-    Serial.print("Created file: ");
-    Serial.println(filename);
-
-    // Write CSV header
-    dataFile.println("Time (s),Current (A),Voltage (V),Torque(N.mm),Thrust(mN),RPM,Airspeed(m/s),Throttle (%),Electrical Power (W),Mechanical Power (W),Propulsive Power (W),Motor Efficiency (%), Propeller Efficiency (%), System Efficiency (%)");
-    dataFile.flush();   // Ensure data is written to the card
-    dataFile.close();
-
-    Serial.println("Header written successfully.");
-    return true; //true means it was successful
+    return (sum/N);
 }
 
 float getVoltage(){ //returns the average of averageCount voltage readings taken one after the other
@@ -685,15 +655,6 @@ float getAirspeed(){
     }
 }
 
-float findAnalogOffset(float (*valueFunction)()){ //pass this a function that returns a value. It will take a bunch of samples and then calculate the offset from 0 and return it to you
-    const int N = 30; //number of iterations
-    float sum = 0;
-    for (int i = 0; i < 50; i++) {
-        sum = sum + valueFunction();
-    }
-    return (sum/N);
-}
-
 void zeroAnalog(){
     VOLTAGE_OFFSET = VOLTAGE_OFFSET + findAnalogOffset(getVoltage);
     CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
@@ -713,8 +674,13 @@ int getRPM() { //returns RPM. Returns -1 if motor is stopped
     return 60000000.0 / (period * pulsesPerRev);
 }
 
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//SENSOR READING FUNCTIONS
+
 void resetSensorData(){ //call to reset all sensor state variables to 0
     //Sense Variables;
+    testTime = 0;
     thrust = 0;
     torque = 0;
     airspeed = 0;
@@ -749,6 +715,9 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
 
     //float airspeed
     airspeed = getAirspeed();
+
+    //time
+    testTime = millis()/1000 - testStartTime;
     
     //Calculated Variables
     electricPower = voltage*current; //watts
@@ -770,79 +739,28 @@ void displaySensorData(){//call to display all relevant test data. Needs to be p
 
     //left bar
     u8g2.setCursor(1, 19); u8g2.print("RPM: "); u8g2.print(RPM); 
-    u8g2.setCursor(1, 26); u8g2.print("THST: "); u8g2.print(thrust/1000); //N
-    u8g2.setCursor(1, 33); u8g2.print("TRQ: "); u8g2.print(torque/1000); //Nm
+    u8g2.setCursor(1, 26); u8g2.print("THST (N): "); u8g2.print(thrust/1000); //N
+    u8g2.setCursor(1, 33); u8g2.print("TRQ (N.m): "); u8g2.print(torque/1000); //Nm
     u8g2.setCursor(1, 40); u8g2.print("VLTS: "); u8g2.print(voltage);
     u8g2.setCursor(1, 47); u8g2.print("AMPS: "); u8g2.print(current); 
-    u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(airspeed); //m/s
+    u8g2.setCursor(1, 54); u8g2.print("ASPD (M/S): "); u8g2.print(airspeed); //m/s
 
     //right bar
     u8g2.setCursor(64, 19); u8g2.print("THRTL: %"); u8g2.print(throttle);
     u8g2.setCursor(64, 26); u8g2.print("E-PWR: "); u8g2.print(electricPower); //W
-    u8g2.setCursor(64, 33); u8g2.print("MTR-PWR: "); u8g2.print(mechanicalPower); //W
-    u8g2.setCursor(64, 40); u8g2.print("PRP-PWR: "); u8g2.print(propellerPower); //W
+    u8g2.setCursor(64, 33); u8g2.print("MTR-PWR (W): "); u8g2.print(mechanicalPower); //W
+    u8g2.setCursor(64, 40); u8g2.print("PRP-PWR (W): "); u8g2.print(propellerPower); //W
     u8g2.setCursor(64, 47); u8g2.print("MTR-EF: % "); u8g2.print(motorEfficiency);
     u8g2.setCursor(64, 54); u8g2.print("PRP-EF: % "); u8g2.print(propellerEfficiency);
     u8g2.setCursor(64, 61); u8g2.print("SYS-EF: % "); u8g2.print(systemEfficiency);
 
-    u8g2.drawStr(4, 63, "Stop Test *");
+    u8g2.drawStr(1, 63, "Stop Test Any Key");
     u8g2.sendBuffer();   
 }
 
-void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
-    
-    if(!setUpTestFile()){
-        return;
-    }
 
-    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
-    wdt_reset();
-
-    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
-    
-    //initialize the test variables
-    bool testRunning = true;
-    throttle = 0;
-    long startTime = millis();
-    long time = startTime;
-
-    while(testRunning){
-        wdt_reset(); //pet that dawg! (cause you're keeping the watchdog from going off by resetting every loop)
-        time = millis() - startTime;
-
-        //throttle mapping
-        if (time < rampTime*1000){ //if time is in initial ramp up period
-            Serial.println(time/1000);
-            throttle = 100*(time/(rampTime))/1000; 
-
-        } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
-            throttle = 100;
-
-        } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
-            long timeAfterRampDown = time-(rampTime + topTime) * 1000;
-            throttle = 100-100*(timeAfterRampDown/(rampTime))/1000;
-        }
-
-        //read, display, and record sensor data for user
-        readSensorData();
-        displaySensorData(throttle);
-
-        //detect the end of the test
-        if (time > (rampTime*2 + topTime)*1000) {
-            testRunning = false;
-        }
-
-        while ((millis() - time) < testDataInterval) { //don't update again until after 
-
-        }
-        //
-    }
-    wdt_disable(); //turn off the watch dog
-}
-
-void runTest(){//this method is in charge of deciding which test to run and then running it
-    runSmoothRampTest();
-}
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//DEBUG MENU
 
 void debugMenu() {
     while(true){
@@ -872,6 +790,157 @@ void debugMenu() {
         }
     }
 }
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//SD CARD FUNCTIONS
+bool setUpTestFile(){//call this function to set up the file with the correct headers. Returns true on a successful setup.
+    //ask user for test file
+    valueEditMenu(&testNumber, "Enter Test Number");
+
+    // Build filename: Test_Number_X.csv
+    char filename[20];
+    snprintf(filename, sizeof(filename), "Test_%d.csv", (int)testNumber); //the test name needs to be less than 8 characters before the .csv
+
+    // Check if file already exists. If it does, prompt user to overwrite or not
+    if (SD.exists(filename)) {
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_t0_14b_tr);
+        u8g2.drawStr(2, 15, "File Name Already");
+        u8g2.drawStr(2, 26, "In Use");
+        u8g2.setFont(u8g2_font_5x7_tr);
+        u8g2.drawStr(3, 55, "Cancel: *");
+        u8g2.drawStr(3, 47, "Overwrite: #");
+        u8g2.sendBuffer();
+
+        while(1){
+            //wait for the user to press a key
+            char userInput = customKeypad.getKey();
+            if (userInput == '#'){
+                SD.remove(filename); //delete the file
+                break; //if user choses to override, exit the loop
+            }
+            if (userInput == '*'){
+                return false; //if user picks cancel, then return false.
+            }
+        }
+    }
+
+    // Create and open file
+    dataFile = SD.open(filename, FILE_WRITE);
+    if (!dataFile) {
+    Serial.println("Failed to create file!");
+    return false;
+    }
+
+    Serial.print("Created file: ");
+    Serial.println(filename);
+
+    // Write CSV header
+    dataFile.println("Time (s),Current (A),Voltage (V),Torque(N.mm),Thrust(mN),RPM,Airspeed(m/s),Throttle (%),Electrical Power (W),Mechanical Power (W),Propulsive Power (W),Motor Efficiency (%), Propeller Efficiency (%), System Efficiency (%)");
+    dataFile.flush();   // Ensure data is written to the card
+
+    Serial.println("Header written successfully.");
+    return true; //true means it was successful
+}
+
+void writeSensorSD(){
+
+    char line[400]; //this needs to fit all the variables
+    snprintf(line, sizeof(line),
+        "%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+        (double)testTime, //float
+        (double)current, //float
+        (double)voltage, //float
+        (double)torque, //float
+        (double)thrust, //float
+        RPM, //int
+        (double)airspeed, //float
+        throttle, //int
+        (double)electricPower, //float
+        (double)mechanicalPower, //float
+        (double)propellerPower, //float
+        (double)motorEfficiency, //float
+        (double)propellerEfficiency, //float
+        (double)systemEfficiency //float
+        );
+    dataFile.println(line);
+    Serial.println(line);
+    if (millis()-lastFlush > testDataInterval){
+        dataFile.flush();
+        lastFlush = millis();
+        Serial.println("Flushed Data")
+    }
+    return;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//TEST FUNCTIONS
+
+void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+    
+    if(!setUpTestFile()){
+        return;
+    }
+
+    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
+    wdt_reset();
+
+    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
+    
+    //initialize the test variables
+    bool testRunning = true;
+    throttle = 0;
+    long startTime = millis(); //this is for keeping track of what throttle level to set
+    long time = startTime;
+    testStartTime = millis()/1000; //this is for recording time to the SD card in seconds
+
+    while(testRunning){
+        wdt_reset(); //pet that dawg! (cause you're keeping the watchdog from going off by resetting every loop)
+        time = millis() - startTime;
+
+        //throttle mapping
+        if (time < rampTime*1000){ //if time is in initial ramp up period
+            Serial.println(time/1000);
+            throttle = 100*(time/(rampTime))/1000; 
+
+        } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
+            throttle = 100;
+
+        } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
+            long timeAfterRampDown = time-(rampTime + topTime) * 1000;
+            throttle = 100-100*(timeAfterRampDown/(rampTime))/1000;
+        }
+
+        //read, display, and record sensor data for user
+        readSensorData();
+        displaySensorData();
+        writeSensorSD();
+
+        //detect the end of the test
+        if (time > (rampTime*2 + topTime)*1000) {
+            testRunning = false;
+        }
+
+        while ((millis() - (time+startTime)) < testDataInterval) { //don't update again until after millis time has passed. Just check for E-Stop
+            Serial.println("Waiting for next loop");
+            char userInput = customKeypad.getKey();
+            if (userInput){
+                throttle = 0;
+                return;
+            }
+        }
+        //
+    }
+    wdt_disable(); //turn off the watch dog
+}
+
+void runTest(){//this method is in charge of deciding which test to run and then running it
+    runSmoothRampTest();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//RUNTIME FUNCTIONS
 
 void setup() {
     u8g2.begin();
@@ -920,7 +989,6 @@ void setup() {
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
 void loop() { 
-
     drawMenu(currentMenuId);
     
     //wait for the user to press a key
