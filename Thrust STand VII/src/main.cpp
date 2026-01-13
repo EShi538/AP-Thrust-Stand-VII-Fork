@@ -869,7 +869,7 @@ void writeSensorSD(){
     if (millis()-lastFlush > testDataInterval){
         dataFile.flush();
         lastFlush = millis();
-        Serial.println("Flushed Data")
+        Serial.println("Flushed Data");
     }
     return;
 }
