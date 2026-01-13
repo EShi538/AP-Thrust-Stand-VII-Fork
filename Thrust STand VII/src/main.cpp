@@ -3,21 +3,44 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <HX711.h>
-#include <Servo.h>
+#include <Servo.h> //
+#include <avr/wdt.h> //watchdog for resetting the test if there's a hardware failure
+#include <EEPROM.h> //eeprom stores the thrust and torque calibrations
 
 /*TODO: 
 Thrust Profiles
+STD Dev of Sensors Calculations
 Airspeed
+Airspeed overwrite
 SD Card Reading
-EEPROM Calibration
+EEPROM Calibration Saving
 RPM Verification
-Current and Voltage
-E-Stop
 */
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //FUNCTION EXTERNALS
 extern void debugMenu();
 extern void runTest();
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//Test Variables;
+const int testDataInterval = 100; //in milliseconds
+
+float thrust = 0; //mN
+float torque = 0; //N.mm
+float airspeed = 0; //m/s
+float current = 0; //amps
+float voltage = 0; //volts
+int RPM = 0;
+
+//Calculated Variables
+float electricPower = 0; //watts
+float mechanicalPower = 0; //watts
+float propellerPower = 0; //watts
+float motorEfficiency = 0; //0-100%
+float propellerEfficiency = 0; //0-100%
+float systemEfficiency = 0; //0-100%
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //LOAD CELLS
 
@@ -38,6 +61,20 @@ extern void calibrateTorque();
 extern void tareThrust();
 extern void calibrateThrust();
 
+///////////////////////////////////////////////////////////////////////////////////////
+// CURRENT AND VOLTAGE SENSOR DEFINITIONS
+
+#define CURRENT_PIN A2
+#define VOLTAGE_PIN A3
+
+const float Vcc = 5.0; //change to match VCC logic voltage of board
+const float CURRENT_SENSITIVITY = 0.020;
+float CURRENT_OFFSET;
+float VOLTAGE_OFFSET;
+const float VOLTAGE_CALIBRATION = 21;
+
+const float averageCount = 40; //this controls how many averages the reading will take
+
 ////////////////////////////////////////////////////////////////////////////////////////
 //RPM Config
 
@@ -53,6 +90,11 @@ void rpmISR() {
     lastPulseMicros = currentPulseMicros;
     currentPulseMicros = micros();
 }
+
+///////////////////////////////////////////////////////////////////////////////////////
+//AIRSPEED SENSOR
+
+long airspeedOverride = 0;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //THROTTLE LOGIC DEFINITIONS
@@ -176,8 +218,7 @@ MenuItem menus[] = {
             {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
-            {232, "Airspeed Override (m/s)", TYPE_VALUE, 23, &pulsesPerRev, NULL},
-
+            {232, "A-Spd Override (m/s)", TYPE_VALUE, 23, &airspeedOverride, NULL},
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {31, "Zero All", TYPE_ACTION, 3, NULL, NULL},
@@ -358,27 +399,33 @@ void executeMenu(int targetMenuId) {
     }
 }
 
-void drawLoadingScreen(int loadPercent){//pass load percent as an int from 0-100
+void drawLoadingScreen(int loadPercent, const char* message){//pass load percent as an int from 0-100
+
+    Serial.println(message);
+
     u8g2.clearBuffer();
 
-    //UW Logo
-    //static const unsigned char image_download_bits[] = {0xa0,0x00,0x00,0x00,0x00,0x80,0x07,0x00,0x00,0x00,0x04,0x3e,0x00,0x00,0x00,0xf8,0xf8,0x00,0x00,0x00,0xc0,0xe3,0x43,0x01,0x00,0x0f,0xdf,0xff,0x03,0x00,0x7c,0xfc,0xff,0x01,0x00,0xe0,0xf9,0xff,0x01,0x00,0x80,0xef,0x7f,0x02,0x00,0x00,0xff,0x3f,0x00,0x00,0x00,0xfe,0x7f,0x40,0x00,0x00,0xfc,0x7f,0x80,0x00,0x00,0xf8,0x07,0x04,0x02,0x00,0x20,0x08,0x10,0x04,0x00,0x00,0x00,0x40,0x08,0x00,0x00,0x00,0x82,0x10,0x00,0x00,0x00,0x04,0x21,0x00,0x00,0x00,0x10,0x22,0x00,0x00,0x00,0x20,0x24,0x00,0x00,0x00,0x40,0x0c,0x00,0x00,0x00,0xc0,0x07,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,0xa0,0x00,0x00,0x00,0xaa,0x8a,0x00,0x00,0x00,0x00,0x30,0x00,0x00,0x00,0xd0,0x03,0x00};
-    //u8g2.drawXBM(85, 25, 38, 26, image_download_bits);
+    //this is the bitmap for the uw logo
+    static const unsigned char image_fzx3lqe_image_bits[] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x80,0x02,0x00,0x00,0x00,0x00,0x00,0x1e,0x00,0x00,0x00,0x00,0x10,0xf8,0x00,0x00,0x00,0x00,0xe0,0xe3,0x03,0x00,0x00,0x00,0x00,0x8f,0x0f,0x05,0x00,0x00,0x3c,0x7c,0xff,0x0f,0x00,0x00,0xf0,0xf1,0xff,0x07,0x00,0x00,0x80,0xe7,0xff,0x07,0x00,0x00,0x00,0xbe,0xff,0x09,0x00,0x00,0x00,0xfc,0xff,0x00,0x00,0x00,0x00,0xf8,0xbf,0x01,0x01,0x00,0x00,0xf0,0x3f,0x00,0x02,0x00,0x00,0xe0,0x1f,0x10,0x08,0x00,0x00,0x80,0x20,0x40,0x10,0x00,0x00,0x00,0x00,0x00,0x21,0x00,0x00,0x00,0x00,0x08,0x42,0x00,0x00,0x00,0x00,0x10,0x84,0x00,0x00,0x00,0x00,0x40,0x88,0x00,0x00,0x00,0x00,0x80,0x90,0x00,0x00,0x00,0x00,0x00,0x31,0x00,0x00,0x00,0x00,0x00,0x1f,0x00,0x00,0x00,0x00,0x00,0x08,0x00,0x00,0x00,0x00,0x80,0x02,0x00,0x00,0x00,0xa8,0x2a,0x02,0x00,0x00,0x00,0x00,0xc0,0x00,0x00,0x00,0x00,0x40,0x0f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
 
+    //draw all the static stuff
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
     u8g2.setFont(u8g2_font_t0_13b_tr);
     u8g2.drawStr(3, 14, "Design Build Fly");
-
     u8g2.setFont(u8g2_font_4x6_tr);
     u8g2.drawStr(3, 22, "At the University of Washington");
+    u8g2.drawStr(98, 63, "2025-26");
+    u8g2.drawXBM(84, 15, 45, 40, image_fzx3lqe_image_bits);
+    u8g2.drawStr(2, 63, "Version 0.1");
+    
 
-    u8g2.drawStr(90, 60, "2025-26");
+    //draw loading bar
+    u8g2.drawRFrame(3, 28, 80, 21, 3);
+    u8g2.drawRBox(3, 28, ((80-6)*loadPercent/100)+6, 21, 3); //loading bar fill in
 
-    u8g2.drawRFrame(2, 30, 126, 21, 3); //loading bar frame
-
-    u8g2.drawRBox(2, 30, ((126-6)*loadPercent/100)+6, 21, 3); //loading bar fill in
-
-    u8g2.drawStr(2, 60, "Version 0.1");
-
+    //draw message
+    u8g2.drawStr(2, 56, message);
 
     u8g2.sendBuffer();
 
@@ -503,9 +550,9 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
     u8g2.setFont(u8g2_font_4x6_tr);
     u8g2.setCursor(3, 24);
     u8g2.print("Raw Value: "); u8g2.print(avgReading);
+    //u8g2.setCursor(3, 31);
+    //u8g2.print("Calibration Factor: "); u8g2.print(avgReading/knownLoad);
     u8g2.setCursor(3, 31);
-    u8g2.print("Calibration Factor: "); u8g2.print(avgReading/knownLoad);
-    u8g2.setCursor(3, 38);
     u8g2.print("Max Sample Deviation: %"); u8g2.print(percentDev);
     u8g2.drawStr(3, 49, "Press any key to continue...");
 
@@ -519,6 +566,41 @@ void calibrateTorque(){ //helper function for the menu, calls calibrateLoadCell
 
 void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
     calibrateLoadCell(&thrustSensor, THST_UNITS);
+}
+
+float getVoltage(){ //returns the average of averageCount voltage readings taken one after the other
+    float sum = 0;
+    for (int i = 0; i < averageCount; i++) {
+        sum = sum + analogRead(VOLTAGE_PIN); //get all of the voltages
+    }
+    int voltage_value_in = sum/averageCount; //calculate the average voltage
+
+    return (VOLTAGE_CALIBRATION * ((voltage_value_in * (Vcc / 1023.0))))-VOLTAGE_OFFSET; //this line converts back from analog 0-1023 to raw voltage, then subtracts off the offset and multiplies by calibration factor
+}
+
+float getCurrent(){ //returns the average of averageCount voltage readings taken one after the other
+    float sum = 0;
+    for (int i = 0; i < averageCount; i++){
+        sum = sum + analogRead(CURRENT_PIN);
+    }
+    int current_value_in = sum/averageCount;    
+    float current_voltage = current_value_in * (Vcc / 1023.0); //this line converts back from analog 0-1023 to raw voltage, then subtracts off the offset and multiplies by calibration factor
+    return (current_voltage/CURRENT_SENSITIVITY)-CURRENT_OFFSET; //then, the analog voltage on the current pin is converted to current
+}
+
+float findAnalogOffset(float (*valueFunction)()){ //pass this a function that returns a value. It will take a bunch of samples and then calculate the offset from 0 and return it to you
+    const int N = 30; //number of iterations
+    float sum = 0;
+    for (int i = 0; i < 50; i++) {
+        sum = sum + valueFunction();
+        delay(50);
+    }
+    return (sum/N);
+}
+
+void zeroAnalog(){
+    VOLTAGE_OFFSET = VOLTAGE_OFFSET + findAnalogOffset(getVoltage);
+    CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
 }
 
 int getRPM() { //returns RPM. Returns -1 if motor is stopped
@@ -535,101 +617,140 @@ int getRPM() { //returns RPM. Returns -1 if motor is stopped
     return 60000000.0 / (period * pulsesPerRev);
 }
 
-struct testExecuteInfo {
-    int throttle; //as a percent from 0-100
-    bool collectData;
-    bool testComplete;
-};
+void resetSensorData(){ //call to reset all sensor state variables to 0
+    //Sense Variables;
+    thrust = 0;
+    torque = 0;
+    airspeed = 0;
+    current = 0;
+    voltage = 0;
+    RPM = 0;
 
-testExecuteInfo smoothRamp(int time){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
-    testExecuteInfo info;
-    info.collectData = true;
-
-    //control throttle
-    info.throttle = 0;
-    if (time < rampTime*1000){ //if time is in initial ramp up period
-        info.throttle = (100*(rampTime*1000-time));
-    } else if (time >= rampTime*1000 & time < (rampTime + topTime)*1000){ //if time is at the top
-        info.throttle = 100;
-    } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
-        info.throttle = 100-(100*((2*rampTime+topTime)*1000-time));
-    }
-
-    //control test completion. Defaults to stop the test (in case of errors)
-    info.testComplete = true;
-    if (time < (2*rampTime + topTime)*1000){
-        info.testComplete = false; 
-    }
-
-    return info;
+    //Calculated Variables
+    electricPower = 0;
+    mechanicalPower = 0;
+    propellerPower = 0;
+    motorEfficiency = 0;
+    propellerEfficiency = 0;
+    systemEfficiency = 0;
 }
 
-void runTest(){
-    //initialize variables
-    float thrust = 0;
-    float torque = 0;
-    float airspeed = 0;
-    int RPM = 0;
+void readSensorData(){ //call to update all of the sensor data to match most recently collected values
+    //read RPM
+    RPM = getRPM();
 
-    while (runTest){
-
-        //read RPM
-        int RPM = getRPM();
-
-        //read torque and thrust
-        if(thrustSensor.is_ready()){
-            float thrust = thrustSensor.get_units();
-        }
-        if(torqueSensor.is_ready()){
-            float torque = torqueSensor.get_units();
-        }
-        
-        //float airspeed
-
-        u8g2.clearBuffer(); //prepare the screen for writing
-        u8g2.setFont(u8g2_font_6x12_tr);
-        u8g2.drawStr(2, 9, "Test Running..."); 
-        u8g2.drawLine(0, 10, 128, 10); //draw line across bottom
-
-        u8g2.setFont(u8g2_font_squeezed_r6_tr); //set small font for submenus
-
-        //left bar
-        u8g2.setCursor(1, 19); u8g2.print("RPM: "); u8g2.print(RPM); 
-        u8g2.setCursor(1, 26); u8g2.print("THST: "); u8g2.print(thrust/1000); //N
-        u8g2.setCursor(1, 33); u8g2.print("TRQ: "); u8g2.print(torque/1000); //Nm
-        u8g2.setCursor(1, 40); u8g2.print("VLTS: "); u8g2.print(torque);
-        u8g2.setCursor(1, 47); u8g2.print("AMPS: "); u8g2.print(torque); 
-        u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(torque); //m/s
-
-        //right bar
-        u8g2.setCursor(64, 19); u8g2.print("THRTL: %"); u8g2.print(digitalRead(rpmPin));
-        u8g2.setCursor(64, 26); u8g2.print("E-PWR: "); u8g2.print(thrust/1000); //W
-        u8g2.setCursor(64, 33); u8g2.print("MTR-PWR: "); u8g2.print(torque/1000); //W
-        u8g2.setCursor(64, 40); u8g2.print("PRP-PWR: "); u8g2.print(torque); //W
-        u8g2.setCursor(64, 47); u8g2.print("MTR-EF: %"); u8g2.print(torque);
-        u8g2.setCursor(64, 54); u8g2.print("PRP-EF: %"); u8g2.print(torque);
-
-
-        u8g2.drawStr(4, 63, "Stop Test *");
-        u8g2.sendBuffer();    
-
-        pressKeyToContinue();
+    //read torque and thrust if ready, otherwise keeps the old values
+    if(thrustSensor.is_ready()){
+        thrust = thrustSensor.get_units();
+    }
+    if(torqueSensor.is_ready()){
+        torque = torqueSensor.get_units();
     }
 
+    //read analog sensors
+    voltage = getVoltage();
+    current = getCurrent();
+
+    //float airspeed
+
+    //Calculated Variables
+    electricPower = voltage*current; //watts
+    mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
+    propellerPower = abs(thrust*airspeed/1000); //
+    motorEfficiency = mechanicalPower/electricPower;
+    propellerEfficiency = propellerEfficiency/mechanicalPower;
+    systemEfficiency = propellerPower/electricPower;
+ 
+}
+
+void displaySensorData(int throttle){//call to display all relevant test data. Needs to be passed current thrust
+    u8g2.clearBuffer(); //prepare the screen for writing
+    u8g2.setFont(u8g2_font_6x12_tr);
+    u8g2.drawStr(2, 9, "Test Running..."); 
+    u8g2.drawLine(0, 10, 128, 10); //draw line across bottom
+
+    u8g2.setFont(u8g2_font_squeezed_r6_tr); //set small font for submenus
+
+    //left bar
+    u8g2.setCursor(1, 19); u8g2.print("RPM: "); u8g2.print(RPM); 
+    u8g2.setCursor(1, 26); u8g2.print("THST: "); u8g2.print(thrust/1000); //N
+    u8g2.setCursor(1, 33); u8g2.print("TRQ: "); u8g2.print(torque/1000); //Nm
+    u8g2.setCursor(1, 40); u8g2.print("VLTS: "); u8g2.print(voltage);
+    u8g2.setCursor(1, 47); u8g2.print("AMPS: "); u8g2.print(current); 
+    u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(airspeed); //m/s
+
+    //right bar
+    u8g2.setCursor(64, 19); u8g2.print("THRTL: %"); u8g2.print(throttle);
+    u8g2.setCursor(64, 26); u8g2.print("E-PWR: "); u8g2.print(electricPower); //W
+    u8g2.setCursor(64, 33); u8g2.print("MTR-PWR: "); u8g2.print(mechanicalPower); //W
+    u8g2.setCursor(64, 40); u8g2.print("PRP-PWR: "); u8g2.print(propellerPower); //W
+    u8g2.setCursor(64, 47); u8g2.print("MTR-EF: % "); u8g2.print(motorEfficiency);
+    u8g2.setCursor(64, 54); u8g2.print("PRP-EF: % "); u8g2.print(propellerEfficiency);
+    u8g2.setCursor(64, 61); u8g2.print("SYS-EF: % "); u8g2.print(systemEfficiency);
+
+    u8g2.drawStr(4, 63, "Stop Test *");
+    u8g2.sendBuffer();   
+}
+
+void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+
+    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
+    wdt_reset();
+
+    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
+    bool testRunning = true;
+    int throttle = 0;
+    long startTime = millis();
+    int time = startTime;
+
+    while(testRunning){
+        wdt_reset(); //pet that dawg! (cause you're keeping the watchdog from going off by resetting every loop)
+        time = millis() - startTime;
+
+        //throttle mapping
+        if (time < rampTime*1000){ //if time is in initial ramp up period
+            throttle = (100*(rampTime*1000-time));
+        } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
+            throttle = 100;
+        } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
+            throttle = 100-(100*((2*rampTime+topTime)*1000-time));
+        }
+
+        //read, display, and record sensor data for user
+        readSensorData();
+        displaySensorData(throttle);
+
+        //detect the end of the test
+        if (time > (rampTime*2 + topTime)*1000) {
+            testRunning = false;
+        }
+
+        //
+    }
+    wdt_disable(); //turn off the watch dog
+}
+
+void runTest(){//this method is in charge of deciding which test to run and then running it
+    runSmoothRampTest();
 }
 
 void debugMenu() {
     while(true){
+        readSensorData();
+
         u8g2.clearBuffer(); //prepare the screen for writing
         u8g2.setFont(u8g2_font_6x12_tr);
         u8g2.drawStr(2, 9, "Debug"); 
         u8g2.drawLine(0, 10, 128, 10); //draw line across bottom
-
         u8g2.setFont(u8g2_font_squeezed_r6_tr); //set small font for submenus
 
-        u8g2.setCursor(4, 19); u8g2.print("RPM Sensor: "); u8g2.print(digitalRead(rpmPin));
-        u8g2.setCursor(4, 26); u8g2.print("Thrust Value: "); u8g2.print(thrustSensor.get_units(1));
-        u8g2.setCursor(4, 33); u8g2.print("Torque Value: "); u8g2.print(torqueSensor.get_units(1));
+        //left bar
+        u8g2.setCursor(1, 19); u8g2.print("RPM Sensor: "); u8g2.print(digitalRead(rpmPin));
+        u8g2.setCursor(1, 26); u8g2.print("THST: "); u8g2.print(thrust/1000); //N
+        u8g2.setCursor(1, 33); u8g2.print("TRQ: "); u8g2.print(torque/1000); //Nm
+        u8g2.setCursor(1, 40); u8g2.print("VLTS: "); u8g2.print(voltage);
+        u8g2.setCursor(1, 47); u8g2.print("AMPS: "); u8g2.print(current); 
+        u8g2.setCursor(1, 54); u8g2.print("ASPD: "); u8g2.print(airspeed); //m/s
 
         u8g2.drawStr(4, 63, "Back: *");
         u8g2.sendBuffer();    
@@ -647,21 +768,27 @@ void setup() {
     Serial.begin(9600); // Start serial communication
     Serial.println("Keypad Ready");
 
-    drawLoadingScreen(0);
-    Serial.println("Force Sensor Initialization");
+    drawLoadingScreen(0, "Attaching pins");
+
+
+    drawLoadingScreen(10, "Initializing SD-Card");
+
+    drawLoadingScreen(20, "Force Sensor Initialization");
     torqueSensor.begin(TRQ_DOUT, TRQ_CLK);
     torqueSensor.set_gain(128);
 
     thrustSensor.begin(THST_DOUT, THST_CLK);
     torqueSensor.set_gain(128);
 
-    drawLoadingScreen(10);
-    Serial.println("Force Sensors Zeroizing");
+    drawLoadingScreen(30, "Thrust Sensors Zeroing");
     torqueSensor.tare();
-    drawLoadingScreen(20);
     thrustSensor.tare();
 
-    drawLoadingScreen(30);
+    drawLoadingScreen(40, "Analog Zeroing");
+    zeroAnalog();
+
+    
+
 
 }
 
