@@ -95,6 +95,10 @@ void rpmISR() {
 //AIRSPEED SENSOR
 
 long airspeedOverride = 0;
+#define AIRSPEED_PIN A1
+#define zeroVoltage 2.7    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOUT ANY AIRFLOW
+#define sensitivity 1   // Sensor sensitivity in V/kPa
+#define airDensity 1.2    // Air density at sea level in kg/m^3
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //THROTTLE LOGIC DEFINITIONS
@@ -588,6 +592,29 @@ float getCurrent(){ //returns the average of averageCount voltage readings taken
     return (current_voltage/CURRENT_SENSITIVITY)-CURRENT_OFFSET; //then, the analog voltage on the current pin is converted to current
 }
 
+float getAirspeed(){ 
+    if(airspeedOverride != 0){ //get the set airspeed inputted by the user
+        return airspeedOverride;
+    }
+    else{ //read airspeed data from the sensor, and returning the average of 40 airspeed sensor readings 
+        float sum = 0;
+        for (int i = 0; i < averageCount; i++){
+            sum = sum + analogRead(AIRSPEED_PIN);
+        }
+        int airspeed_value_in = sum/averageCount;
+        float airspeed_voltage =  airspeed_value_in * (Vcc / 1023.0); 
+
+        float pressure_kPa = (airspeed_voltage - zeroVoltage) / 1.0; // Convert voltage to differential pressure in kPa
+        float pressure_Pa = pressure_kPa * 1000.0; // Convert kPa to Pascals
+
+        float airspeed = 0.0;          
+        if (pressure_Pa > 0) {
+            airspeed = sqrt((2.0 * pressure_Pa) / airDensity); // Compute airspeed using Bernoulli equation
+        }
+        return airspeed;
+    }
+}
+
 float findAnalogOffset(float (*valueFunction)()){ //pass this a function that returns a value. It will take a bunch of samples and then calculate the offset from 0 and return it to you
     const int N = 30; //number of iterations
     float sum = 0;
@@ -652,7 +679,8 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
     current = getCurrent();
 
     //float airspeed
-
+    airspeed = getAirspeed();
+    
     //Calculated Variables
     electricPower = voltage*current; //watts
     mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
@@ -786,9 +814,6 @@ void setup() {
 
     drawLoadingScreen(40, "Analog Zeroing");
     zeroAnalog();
-
-    
-
 
 }
 
