@@ -6,6 +6,8 @@
 #include <Servo.h> //
 #include <avr/wdt.h> //watchdog for resetting the test if there's a hardware failure
 #include <EEPROM.h> //eeprom stores the thrust and torque calibrations
+#include <SPI.h> //used for the Spi needed for the SD card
+#include <SD.h> //used for the SD card
 
 /*TODO: 
 Thrust Profiles
@@ -21,6 +23,12 @@ RPM Verification
 //FUNCTION EXTERNALS
 extern void debugMenu();
 extern void runTest();
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//EEPROM Variables
+
+#define THST_CAL_ADDRESS 0
+#define TRQ_CAL_ADDRESS 100 //make sure this is sufficiently spaced from thst cal to avoid overwriting
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //Test Variables;
@@ -42,17 +50,26 @@ float propellerEfficiency = 0; //0-100%
 float systemEfficiency = 0; //0-100%
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
+//SD CARD
+
+const int SD_CS_PIN = 53;     // Change if your module uses a different CS
+File dataFile; //used for the arduino to write to
+const int flushPeriodMillis = 1000; //this is how often the arduino will flush
+const long lastFlush = 0;
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
 //LOAD CELLS
 
 HX711 thrustSensor;
 HX711 torqueSensor;
 
-#define TRQ_DOUT 52
-#define TRQ_CLK 53
+#define TRQ_DOUT 48
+#define TRQ_CLK 49
 #define TRQ_UNITS "(N.mm)"
 
-#define THST_DOUT 50
-#define THST_CLK 51
+#define THST_DOUT 46
+#define THST_CLK 47
 #define THST_UNITS "(mN)"
 
 extern void tareTorque(); //these need to be here so the menu structure knows these exist before they're declared in the file
@@ -95,8 +112,8 @@ void rpmISR() {
 //AIRSPEED SENSOR
 
 long airspeedOverride = 0;
-#define AIRSPEED_PIN A1
-#define zeroVoltage 2.7    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOUT ANY AIRFLOW
+#define AIRSPEED_PIN A7
+float zeroVoltage = 2.7;    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOUT ANY AIRFLOW
 #define sensitivity 1   // Sensor sensitivity in V/kPa
 #define airDensity 1.2    // Air density at sea level in kg/m^3
 
@@ -117,7 +134,7 @@ const int ESC_PIN = 2;
 long testNumber = 1;
 
 //smooth ramp
-long rampTime = 30; //in seconds
+long rampTime = 15; //in seconds
 long topTime = 4; //in seconds
 long smoothThrottleMax = 100; //as a percent
 bool upDown = true; //if true, go up and then back down
@@ -240,9 +257,7 @@ MenuItem menus[] = {
 const int MENU_COUNT = sizeof(menus)/sizeof(menus[0]);
 int currentMenuId = 0; //this keeps track of the current menu state
 
-//returns null if no Menu Item with that ID, otherwise returns a pointer
-//to the item.
-MenuItem* getMenu(int menuId) {
+MenuItem* getMenu(int menuId) {//returns null if no Menu Item with that ID, otherwise returns a pointer to the item
     for (int i = 0; i < MENU_COUNT; i++) {
         if (menus[i].itemId == menuId) {
             return &menus[i]; //this is a pointer to the menu item.
@@ -466,6 +481,7 @@ void tareTorque(){
 
 void tareThrust(){
     tareLoadCell(&thrustSensor);
+
 }
 
 void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and the unit string, and will take the user through calibration
@@ -566,10 +582,60 @@ void calibrateLoadCell(HX711* loadCell, String units) {//pass a load cell and th
 
 void calibrateTorque(){ //helper function for the menu, calls calibrateLoadCell
     calibrateLoadCell(&torqueSensor, TRQ_UNITS);
+    EEPROM.put(TRQ_CAL_ADDRESS, torqueSensor.get_scale()); //write the scale to EEPROM
 }
 
 void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
     calibrateLoadCell(&thrustSensor, THST_UNITS);
+    EEPROM.put(THST_CAL_ADDRESS, thrustSensor.get_scale()); //write the scale factor to EEPROM
+}
+
+bool setUpTestFile(){//call this function to set up the file with the correct headers. Returns true on a successful setup.
+    //ask user for test file
+    valueEditMenu(&testNumber, "Enter Test Number");
+
+    // Build filename: Test_Number_X.csv
+    char filename[20];
+    snprintf(filename, sizeof(filename), "Test_Number_%d.csv", testNumber);
+
+    // Check if file already exists. If it does, prompt user to overwrite or not
+    if (SD.exists(filename)) {
+        u8g2.setFont(u8g2_font_t0_14b_tr);
+        u8g2.drawStr(2, 15, "File Name Already");
+        u8g2.drawStr(2, 26, "In Use");
+        u8g2.setFont(u8g2_font_5x7_tr);
+        u8g2.drawStr(3, 55, "Cancel: *");
+        u8g2.drawStr(3, 47, "Overwrite: #");
+        u8g2.sendBuffer();
+
+        while(1){
+            //wait for the user to press a key
+            char userInput = customKeypad.getKey();
+            if (userInput == '#'){
+                break; //if user choses to override, exit the loop
+            }
+            if (userInput == '*'){
+                return false; //if user picks cancel, then return false.
+            }
+        }
+    }
+
+    // Create and open file
+    dataFile = SD.open(filename, FILE_WRITE);
+    if (!dataFile) {
+    Serial.println("Failed to create file!");
+    return;
+    }
+
+    Serial.print("Created file: ");
+    Serial.println(filename);
+
+    // Write CSV header
+    dataFile.println("Time_ms,RPM,Voltage,Current");
+    dataFile.flush();   // Ensure data is written to the card
+    dataFile.close();
+
+    Serial.println("Header written successfully.");
 }
 
 float getVoltage(){ //returns the average of averageCount voltage readings taken one after the other
@@ -593,10 +659,10 @@ float getCurrent(){ //returns the average of averageCount voltage readings taken
 }
 
 float getAirspeed(){ 
-    if(airspeedOverride != 0){ //get the set airspeed inputted by the user
+    if(airspeedOverride != 0){ //get the set airspeed inputted by the user, if they chose an override
         return airspeedOverride;
     }
-    else{ //read airspeed data from the sensor, and returning the average of 40 airspeed sensor readings 
+    else{ //read airspeed data from the sensor, and returning the average of a bunch of airspeed sensor readings. average count is defined globally 
         float sum = 0;
         for (int i = 0; i < averageCount; i++){
             sum = sum + analogRead(AIRSPEED_PIN);
@@ -620,7 +686,6 @@ float findAnalogOffset(float (*valueFunction)()){ //pass this a function that re
     float sum = 0;
     for (int i = 0; i < 50; i++) {
         sum = sum + valueFunction();
-        delay(50);
     }
     return (sum/N);
 }
@@ -729,7 +794,7 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
     bool testRunning = true;
     int throttle = 0;
     long startTime = millis();
-    int time = startTime;
+    long time = startTime;
 
     while(testRunning){
         wdt_reset(); //pet that dawg! (cause you're keeping the watchdog from going off by resetting every loop)
@@ -737,11 +802,15 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
 
         //throttle mapping
         if (time < rampTime*1000){ //if time is in initial ramp up period
-            throttle = (100*(rampTime*1000-time));
+            Serial.println(time/1000);
+            throttle = 100*(time/(rampTime))/1000; 
+
         } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
             throttle = 100;
+
         } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
-            throttle = 100-(100*((2*rampTime+topTime)*1000-time));
+            long timeAfterRampDown = time-(rampTime + topTime) * 1000;
+            throttle = 100-100*(timeAfterRampDown/(rampTime))/1000;
         }
 
         //read, display, and record sensor data for user
@@ -753,6 +822,9 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
             testRunning = false;
         }
 
+        while ((millis() - time) < testDataInterval) { //don't update again until after 
+
+        }
         //
     }
     wdt_disable(); //turn off the watch dog
@@ -797,9 +869,16 @@ void setup() {
     Serial.println("Keypad Ready");
 
     drawLoadingScreen(0, "Attaching pins");
-
+    attachInterrupt(digitalPinToInterrupt(rpmPin), rpmISR, RISING); //attach RPM pin
 
     drawLoadingScreen(10, "Initializing SD-Card");
+    // Required for Mega SPI
+    pinMode(53, OUTPUT);
+
+    if (!SD.begin(SD_CS_PIN)) {
+        Serial.println("SD card initialization failed!");
+        return;
+    }
 
     drawLoadingScreen(20, "Force Sensor Initialization");
     torqueSensor.begin(TRQ_DOUT, TRQ_CLK);
@@ -815,11 +894,23 @@ void setup() {
     drawLoadingScreen(40, "Analog Zeroing");
     zeroAnalog();
 
+    drawLoadingScreen(50, "Loading Calibration Factors");
+    float torqueSensorScale;
+    EEPROM.get(TRQ_CAL_ADDRESS, torqueSensorScale); 
+    torqueSensor.set_scale(torqueSensorScale);
+
+    float thrustSensorScale;
+    EEPROM.get(THST_CAL_ADDRESS, thrustSensorScale); 
+    Serial.println(thrustSensorScale);
+    thrustSensor.set_scale(thrustSensorScale);
+
+
 }
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
 //If you would like your function to return to the main menu after completing, set the currentMenuId to zero at the end of your function runs
 void loop() { 
+
     drawMenu(currentMenuId);
     
     //wait for the user to press a key
