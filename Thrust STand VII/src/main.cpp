@@ -40,6 +40,7 @@ float airspeed = 0; //m/s
 float current = 0; //amps
 float voltage = 0; //volts
 int RPM = 0;
+int throttle = 0;
 
 //Calculated Variables
 float electricPower = 0; //watts
@@ -54,8 +55,8 @@ float systemEfficiency = 0; //0-100%
 
 const int SD_CS_PIN = 53;     // Change if your module uses a different CS
 File dataFile; //used for the arduino to write to
-const int flushPeriodMillis = 1000; //this is how often the arduino will flush
-const long lastFlush = 0;
+const int flushPeriodMillis = 1000; //this is how often the arduino will flush (save to the SD card) while doing a test
+const long lastFlush = 0; 
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -596,10 +597,11 @@ bool setUpTestFile(){//call this function to set up the file with the correct he
 
     // Build filename: Test_Number_X.csv
     char filename[20];
-    snprintf(filename, sizeof(filename), "Test_Number_%d.csv", testNumber);
+    snprintf(filename, sizeof(filename), "Test_%d.csv", (int)testNumber); //the test name needs to be less than 8 characters before the .csv
 
     // Check if file already exists. If it does, prompt user to overwrite or not
     if (SD.exists(filename)) {
+        u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_t0_14b_tr);
         u8g2.drawStr(2, 15, "File Name Already");
         u8g2.drawStr(2, 26, "In Use");
@@ -612,6 +614,7 @@ bool setUpTestFile(){//call this function to set up the file with the correct he
             //wait for the user to press a key
             char userInput = customKeypad.getKey();
             if (userInput == '#'){
+                SD.remove(filename); //delete the file
                 break; //if user choses to override, exit the loop
             }
             if (userInput == '*'){
@@ -624,18 +627,19 @@ bool setUpTestFile(){//call this function to set up the file with the correct he
     dataFile = SD.open(filename, FILE_WRITE);
     if (!dataFile) {
     Serial.println("Failed to create file!");
-    return;
+    return false;
     }
 
     Serial.print("Created file: ");
     Serial.println(filename);
 
     // Write CSV header
-    dataFile.println("Time_ms,RPM,Voltage,Current");
+    dataFile.println("Time (s),Current (A),Voltage (V),Torque(N.mm),Thrust(mN),RPM,Airspeed(m/s),Throttle (%),Electrical Power (W),Mechanical Power (W),Propulsive Power (W),Motor Efficiency (%), Propeller Efficiency (%), System Efficiency (%)");
     dataFile.flush();   // Ensure data is written to the card
     dataFile.close();
 
     Serial.println("Header written successfully.");
+    return true; //true means it was successful
 }
 
 float getVoltage(){ //returns the average of averageCount voltage readings taken one after the other
@@ -756,7 +760,7 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
  
 }
 
-void displaySensorData(int throttle){//call to display all relevant test data. Needs to be passed current thrust
+void displaySensorData(){//call to display all relevant test data. Needs to be passed current thrust
     u8g2.clearBuffer(); //prepare the screen for writing
     u8g2.setFont(u8g2_font_6x12_tr);
     u8g2.drawStr(2, 9, "Test Running..."); 
@@ -786,13 +790,19 @@ void displaySensorData(int throttle){//call to display all relevant test data. N
 }
 
 void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+    
+    if(!setUpTestFile()){
+        return;
+    }
 
     wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
     wdt_reset();
 
     resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
+    
+    //initialize the test variables
     bool testRunning = true;
-    int throttle = 0;
+    throttle = 0;
     long startTime = millis();
     long time = startTime;
 
@@ -874,10 +884,10 @@ void setup() {
     drawLoadingScreen(10, "Initializing SD-Card");
     // Required for Mega SPI
     pinMode(53, OUTPUT);
+    pinMode(SD_CS_PIN, OUTPUT);
 
-    if (!SD.begin(SD_CS_PIN)) {
+    while (!SD.begin(SD_CS_PIN)) {
         Serial.println("SD card initialization failed!");
-        return;
     }
 
     drawLoadingScreen(20, "Force Sensor Initialization");
