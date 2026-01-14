@@ -23,6 +23,7 @@ RPM Verification
 //FUNCTION EXTERNALS
 extern void debugMenu();
 extern void runTest();
+extern void zeroAnalog();
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //EEPROM Variables
@@ -57,9 +58,8 @@ float systemEfficiency = 0; //0-100%
 
 const int SD_CS_PIN = 53;     // Change if your module uses a different CS
 File dataFile; //used for the arduino to write to
-const int flushPeriodMillis = 1000; //this is how often the arduino will flush (save to the SD card) while doing a test
+const int flushPeriodMillis = 5000; //this is how often the arduino will flush (save to the SD card) while doing a test
 int lastFlush = 0; 
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //LOAD CELLS
@@ -93,6 +93,7 @@ float CURRENT_OFFSET;
 float VOLTAGE_OFFSET;
 const float VOLTAGE_CALIBRATION = 21;
 
+long averageGain = 25; //how strong the moving average is for moving average sensors 
 const float averageCount = 40; //this controls how many averages the reading will take
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -125,9 +126,9 @@ float zeroVoltage = 2.7;    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOU
 //(For a HARGRAVE MICRODRIVE ESC, accepted PWM frequencies range from 50Hz to 499 Hz
 
 Servo esc; 
-const int MIN_THROTTLE = 1000;
+const int MIN_THROTTLE = 950;
 const int MAX_THROTTLE = 2000;
-const int ESC_PIN = 2;
+const int ESC_PIN = 3;
 
 //-----------------------------------------GLOBAL VARIABLES-----------------------------------
 
@@ -241,14 +242,14 @@ MenuItem menus[] = {
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
             {232, "A-Spd Override (m/s)", TYPE_VALUE, 23, &airspeedOverride, NULL},
+            {233, "Moving AVG Gain (0-100)", TYPE_VALUE, 23, &averageGain, NULL},
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
-        {31, "Zero All", TYPE_ACTION, 3, NULL, NULL},
         {32, "Zero Thrust", TYPE_ACTION, 3, NULL, tareThrust},
         {33, "Zero Torque", TYPE_ACTION, 3, NULL, tareTorque},
         {34, "Calibrate Thrust Sensor", TYPE_ACTION, 3, NULL, calibrateThrust},
         {35, "Calibrate Torque Sensor", TYPE_ACTION, 3, NULL, calibrateTorque},
-        {36, "Zero Analog", TYPE_ACTION, 3, NULL, NULL},
+        {36, "Zero Analog", TYPE_ACTION, 3, NULL, zeroAnalog},
 
     {4, "Debug", TYPE_ACTION, 0, NULL, debugMenu},
 }; 
@@ -606,8 +607,9 @@ void calibrateThrust(){//helper function for the menu, calls calibrateLoadCell
 float findAnalogOffset(float (*valueFunction)()){ //pass this a function that returns a value. It will take a bunch of samples and then calculate the offset from 0 and return it to you
     const int N = 30; //number of iterations
     float sum = 0;
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < N; i++) {
         sum = sum + valueFunction();
+        delay(50);
     }
     return (sum/N);
 }
@@ -656,6 +658,12 @@ float getAirspeed(){
 }
 
 void zeroAnalog(){
+    //tell user we are zeroizing
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_t0_22b_tr);
+    u8g2.drawStr(14, 39, "Zeroing");
+    u8g2.sendBuffer();
+
     VOLTAGE_OFFSET = VOLTAGE_OFFSET + findAnalogOffset(getVoltage);
     CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
 }
@@ -698,6 +706,12 @@ void resetSensorData(){ //call to reset all sensor state variables to 0
 }
 
 void readSensorData(){ //call to update all of the sensor data to match most recently collected values
+
+    if (averageGain > 100 || averageGain < 0) {
+        Serial.println("Avg gain out of bounds");
+        averageGain = 0;
+    }
+
     //read RPM
     RPM = getRPM();
 
@@ -711,21 +725,21 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
 
     //read analog sensors
     voltage = getVoltage();
-    current = getCurrent();
+    current = (1-(averageGain/100.0))* current + (averageGain/100.0)*getCurrent(); //moving average
 
     //float airspeed
     airspeed = getAirspeed();
 
     //time
-    testTime = millis()/1000 - testStartTime;
+    testTime = millis()/1000.0 - testStartTime;
     
     //Calculated Variables
-    electricPower = voltage*current; //watts
+    electricPower = abs(voltage*current); //watts
     mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
     propellerPower = abs(thrust*airspeed/1000); //
-    motorEfficiency = mechanicalPower/electricPower;
-    propellerEfficiency = propellerEfficiency/mechanicalPower;
-    systemEfficiency = propellerPower/electricPower;
+    motorEfficiency = abs(mechanicalPower/electricPower);
+    propellerEfficiency = abs(propellerEfficiency/mechanicalPower);
+    systemEfficiency = abs(propellerPower/electricPower);
  
 }
 
@@ -846,27 +860,25 @@ bool setUpTestFile(){//call this function to set up the file with the correct he
 
 void writeSensorSD(){
 
-    char line[400]; //this needs to fit all the variables
-    snprintf(line, sizeof(line),
-        "%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
-        (double)testTime, //float
-        (double)current, //float
-        (double)voltage, //float
-        (double)torque, //float
-        (double)thrust, //float
-        RPM, //int
-        (double)airspeed, //float
-        throttle, //int
-        (double)electricPower, //float
-        (double)mechanicalPower, //float
-        (double)propellerPower, //float
-        (double)motorEfficiency, //float
-        (double)propellerEfficiency, //float
-        (double)systemEfficiency //float
-        );
-    dataFile.println(line);
-    Serial.println(line);
-    if (millis()-lastFlush > testDataInterval){
+    // Write one CSV row (Method 2: print-based)
+
+    dataFile.print(testTime, 3);            dataFile.print(','); // float
+    dataFile.print(current, 3);             dataFile.print(','); // float
+    dataFile.print(voltage, 3);             dataFile.print(','); // float
+    dataFile.print(torque, 3);              dataFile.print(','); // float
+    dataFile.print(thrust, 3);              dataFile.print(','); // float
+    dataFile.print(RPM);                    dataFile.print(','); // int
+    dataFile.print(airspeed, 3);            dataFile.print(','); // float
+    dataFile.print(throttle);               dataFile.print(','); // int
+    dataFile.print(electricPower, 3);       dataFile.print(','); // float
+    dataFile.print(mechanicalPower, 3);     dataFile.print(','); // float
+    dataFile.print(propellerPower, 3);      dataFile.print(','); // float
+    dataFile.print(motorEfficiency, 3);     dataFile.print(','); // float
+    dataFile.print(propellerEfficiency, 3); dataFile.print(','); // float
+    dataFile.print(systemEfficiency, 3);    dataFile.println();  // float + newline
+
+    //don't flush all the time
+    if ((millis()-lastFlush) > flushPeriodMillis){
         dataFile.flush();
         lastFlush = millis();
         Serial.println("Flushed Data");
@@ -877,8 +889,20 @@ void writeSensorSD(){
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //TEST FUNCTIONS
 
-void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+void setThrottle(int throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
+    int throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
+
+    if (throttleSetting > 100 || throttleSetting < 0){ //if the throttle is out of bounds, set it to 0
+        throttleMicroseconds = MIN_THROTTLE;
+    }
     
+    esc.writeMicroseconds(throttleMicroseconds);
+    Serial.print("Throttle Microseconds: "); Serial.println(throttleMicroseconds);
+}
+
+void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+    esc.writeMicroseconds(MIN_THROTTLE);
+
     if(!setUpTestFile()){
         return;
     }
@@ -922,16 +946,24 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
             testRunning = false;
         }
 
+        setThrottle(throttle);
+
         while ((millis() - (time+startTime)) < testDataInterval) { //don't update again until after millis time has passed. Just check for E-Stop
             Serial.println("Waiting for next loop");
             char userInput = customKeypad.getKey();
             if (userInput){
                 throttle = 0;
+                setThrottle(0);
                 return;
             }
         }
         //
     }
+
+    throttle = 0;
+    setThrottle(0);
+    testNumber++;
+    dataFile.close();
     wdt_disable(); //turn off the watch dog
 }
 
@@ -949,6 +981,8 @@ void setup() {
 
     drawLoadingScreen(0, "Attaching pins");
     attachInterrupt(digitalPinToInterrupt(rpmPin), rpmISR, RISING); //attach RPM pin
+    esc.attach(ESC_PIN);
+    esc.writeMicroseconds(MIN_THROTTLE);
 
     drawLoadingScreen(10, "Initializing SD-Card");
     // Required for Mega SPI
@@ -971,7 +1005,7 @@ void setup() {
     thrustSensor.tare();
 
     drawLoadingScreen(40, "Analog Zeroing");
-    zeroAnalog();
+    //zeroAnalog(); skipping this currently
 
     drawLoadingScreen(50, "Loading Calibration Factors");
     float torqueSensorScale;
