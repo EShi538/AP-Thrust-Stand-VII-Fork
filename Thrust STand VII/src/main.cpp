@@ -19,6 +19,8 @@ EEPROM Calibration Saving
 RPM Verification
 */
 
+const char* Version = "Version 1.1";
+
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //FUNCTION EXTERNALS
 extern void debugMenu();
@@ -442,7 +444,7 @@ void drawLoadingScreen(int loadPercent, const char* message){//pass load percent
     u8g2.drawStr(3, 22, "At the University of Washington");
     u8g2.drawStr(98, 63, "2025-26");
     u8g2.drawXBM(84, 15, 45, 40, image_fzx3lqe_image_bits);
-    u8g2.drawStr(2, 63, "Version 0.1");
+    u8g2.drawStr(2, 63, Version);
     
 
     //draw loading bar
@@ -673,7 +675,7 @@ int getRPM() { //returns RPM. Returns -1 if motor is stopped
     long oldPulse = lastPulseMicros;
     long newPulse = currentPulseMicros;
     interrupts();
-    
+
     Serial.print("Old Pulse: "); Serial.println(oldPulse);
     Serial.print("New Pulse: "); Serial.println(newPulse);
     unsigned long period = newPulse - oldPulse;
