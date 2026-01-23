@@ -672,9 +672,12 @@ int getRPM() { //returns RPM. Returns -1 if motor is stopped
     noInterrupts();
     long oldPulse = lastPulseMicros;
     long newPulse = currentPulseMicros;
-    unsigned long period = oldPulse - newPulse;
     interrupts();
-
+    
+    Serial.print("Old Pulse: "); Serial.println(oldPulse);
+    Serial.print("New Pulse: "); Serial.println(newPulse);
+    unsigned long period = newPulse - oldPulse;
+   
     if (period > 5e6) { //if it's been more than 5 seconds since a pulse, then return stopped
         return -1;
     }
