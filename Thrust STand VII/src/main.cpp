@@ -107,7 +107,7 @@ long pulsesPerRev = 1; //number of markers
 
 volatile unsigned long pulses;
 long lastRpmReadTime = 0;
-long rpmUpdateRate = 1000; //update rate of rpm reading in ms
+long rpmUpdateRate = 250; //update rate of rpm reading in ms
 
 //interrupt service routine
 void rpmISR() {
@@ -944,8 +944,9 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
             throttle = testThrottleMax;
 
         } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
-            long timeAfterRampDown = time-(rampTime + topTime) * 1000;
-            throttle = testThrottleMax*(1-(timeAfterRampDown/(rampTime))/1000);
+            long timeAfterRampDown = time-((rampTime + topTime) * 1000); //timeAfterRampDown is in millis
+            throttle = testThrottleMax - testThrottleMax * (timeAfterRampDown/(rampTime))/1000;
+            Serial.print("Ramp Down: "); Serial.println(throttle);
         }
 
         //read, display, and record sensor data for user
