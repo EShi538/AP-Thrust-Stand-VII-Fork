@@ -820,7 +820,7 @@ void debugMenu() {
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //SD CARD FUNCTIONS
-bool setUpTestFile(){//call this function to set up the file with the correct headers. Returns true on a successful setup.
+bool setUpTest(){//call this function to set up the file with the correct headers. Returns true on a successful setup. Also prompts the user to initiate the test. Begin the test right after a succesful call.
     //ask user for test file
     valueEditMenu(&testNumber, "Enter Test Number");
 
@@ -867,6 +867,28 @@ bool setUpTestFile(){//call this function to set up the file with the correct he
     dataFile.flush();   // Ensure data is written to the card
 
     Serial.println("Header written successfully.");
+
+    //prompt the user to begin the test.
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_t0_14b_tr);
+    u8g2.drawStr(2, 15, "Start Test When");
+    u8g2.drawStr(2, 26, "Ready");
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(3, 55, "Cancel: *");
+    u8g2.drawStr(3, 47, "Start: #");
+    u8g2.sendBuffer();
+
+    while(1){
+        //wait for the user to press a key
+        char userInput = customKeypad.getKey();
+        if (userInput == '#'){
+            SD.remove(filename); //delete the file
+            break; //if user choses to override, exit the loop
+        }
+        if (userInput == '*'){
+            return false; //if user picks cancel, then return false.
+        }
+    }
     return true; //true means it was successful
 }
 
@@ -915,7 +937,7 @@ void setThrottle(int throttleSetting){ //pass this a throttle from 0-100 and it 
 void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
     esc.writeMicroseconds(MIN_THROTTLE);
 
-    if(!setUpTestFile()){
+    if(!setUpTest()){
         return;
     }
 
