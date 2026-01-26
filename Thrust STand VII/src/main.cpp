@@ -105,13 +105,13 @@ const byte rpmPin = 2;                  // Interrupt pin
 const unsigned long window_ms = 250;    // RPM update window
 long pulsesPerRev = 1; //number of markers
 
-volatile unsigned long lastPulseMicros = 0;
-volatile unsigned long currentPulseMicros = 0;
+volatile unsigned long pulses;
+long lastRpmReadTime = 0;
+long rpmUpdateRate = 1000; //update rate of rpm reading in ms
 
 //interrupt service routine
 void rpmISR() {
-    lastPulseMicros = currentPulseMicros;
-    currentPulseMicros = micros();
+    pulses++;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -142,7 +142,7 @@ long testNumber = 1;
 //smooth ramp
 long rampTime = 15; //in seconds
 long topTime = 4; //in seconds
-long smoothThrottleMax = 100; //as a percent
+long testThrottleMax = 100; //as a percent
 bool upDown = true; //if true, go up and then back down
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -240,11 +240,13 @@ MenuItem menus[] = {
             {221, "Smooth", TYPE_SUBMENU, 22, NULL, NULL},
                 {2211, "Ramp Up Time (s)", TYPE_VALUE, 221, &rampTime, NULL},
                 {2212, "Top Hold Time (s)", TYPE_VALUE, 221, &topTime, NULL},
+                {2213, "Max Throttle (0-100%)", TYPE_VALUE, 221, &testThrottleMax, NULL},
             {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
-            {232, "A-Spd Override (m/s)", TYPE_VALUE, 23, &airspeedOverride, NULL},
-            {233, "Moving AVG Gain (0-100)", TYPE_VALUE, 23, &averageGain, NULL},
+            {232, "RPM Update Rate (ms)", TYPE_VALUE, 23, &rpmUpdateRate, NULL},
+            {233, "A-Spd Override (m/s)", TYPE_VALUE, 23, &airspeedOverride, NULL},
+            {234, "Moving AVG Gain (0-100)", TYPE_VALUE, 23, &averageGain, NULL},
 
     {3, "Tare Sensors", TYPE_SUBMENU, 0, NULL, NULL},
         {32, "Zero Thrust", TYPE_ACTION, 3, NULL, tareThrust},
@@ -670,21 +672,26 @@ void zeroAnalog(){
     CURRENT_OFFSET = CURRENT_OFFSET + findAnalogOffset(getCurrent);
 }
 
-int getRPM() { //returns RPM. Returns -1 if motor is stopped
-    noInterrupts();
-    long oldPulse = lastPulseMicros;
-    long newPulse = currentPulseMicros;
-    interrupts();
+int getRPM() { //returns RPM. Updates once per rpm update ms
+    long period = millis() - lastRpmReadTime;
 
-    Serial.print("Old Pulse: "); Serial.println(oldPulse);
-    Serial.print("New Pulse: "); Serial.println(newPulse);
-    unsigned long period = newPulse - oldPulse;
-   
-    if (period > 5e6) { //if it's been more than 5 seconds since a pulse, then return stopped
-        return -1;
+    if (period < rpmUpdateRate) {
+        Serial.println("RPM not ready");
+        return RPM;
     }
 
-    return 60000000.0 / (period * pulsesPerRev);
+    //grab RPM from sensor, and reset the time before the count starts again.
+    noInterrupts();
+    long pulseCount = pulses;
+    pulses = 0;
+    lastRpmReadTime = millis();
+    interrupts();
+
+    if (pulseCount == 0) { //this protects against a divide by zero
+        return 0;
+    }
+   
+    return (pulseCount*60000)/period;
 }
 
 
@@ -931,14 +938,14 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
         //throttle mapping
         if (time < rampTime*1000){ //if time is in initial ramp up period
             Serial.println(time/1000);
-            throttle = 100*(time/(rampTime))/1000; 
+            throttle = testThrottleMax*(time/(rampTime))/1000; 
 
         } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
-            throttle = 100;
+            throttle = testThrottleMax;
 
         } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
             long timeAfterRampDown = time-(rampTime + topTime) * 1000;
-            throttle = 100-100*(timeAfterRampDown/(rampTime))/1000;
+            throttle = testThrottleMax*(1-(timeAfterRampDown/(rampTime))/1000);
         }
 
         //read, display, and record sensor data for user
@@ -953,16 +960,14 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
 
         setThrottle(throttle);
 
-        while ((millis() - (time+startTime)) < testDataInterval) { //don't update again until after millis time has passed. Just check for E-Stop
-            Serial.println("Waiting for next loop");
-            char userInput = customKeypad.getKey();
-            if (userInput){
-                throttle = 0;
-                setThrottle(0);
-                return;
-            }
+        //check for any user input, cancel test if they pressed anything
+        char userInput = customKeypad.getKey();
+        if (userInput){
+            throttle = 0;
+            setThrottle(0);
+            testRunning = false;
         }
-        //
+
     }
 
     throttle = 0;
