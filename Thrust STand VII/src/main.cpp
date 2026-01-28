@@ -855,8 +855,8 @@ bool setUpTest(){//call this function to set up the file with the correct header
     // Create and open file
     dataFile = SD.open(filename, FILE_WRITE);
     if (!dataFile) {
-    Serial.println("Failed to create file!");
-    return false;
+        Serial.println("Failed to create file!");
+        return false;
     }
 
     Serial.print("Created file: ");
@@ -882,10 +882,10 @@ bool setUpTest(){//call this function to set up the file with the correct header
         //wait for the user to press a key
         char userInput = customKeypad.getKey();
         if (userInput == '#'){
-            SD.remove(filename); //delete the file
             break; //if user choses to override, exit the loop
         }
         if (userInput == '*'){
+            SD.remove(filename); //delete the file if the user cancels
             return false; //if user picks cancel, then return false.
         }
     }
