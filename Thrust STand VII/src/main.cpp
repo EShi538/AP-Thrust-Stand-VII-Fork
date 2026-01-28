@@ -750,7 +750,7 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
     mechanicalPower = abs(torque*RPM*0.1047/1000); //RPM is converted to Rad/S, torque is converted to N.m from N.mm
     propellerPower = abs(thrust*airspeed/1000); //
     motorEfficiency = abs(mechanicalPower/electricPower);
-    propellerEfficiency = abs(propellerEfficiency/mechanicalPower);
+    propellerEfficiency = abs(propellerPower/mechanicalPower);
     systemEfficiency = abs(propellerPower/electricPower);
  
 }
