@@ -1,9 +1,8 @@
 #include <Arduino.h>
-#include <Keypad.h>
-#include <U8g2lib.h>
-#include <Wire.h>
-#include <HX711.h>
-#include <Servo.h> //
+#include <Keypad.h> //library for reading the 4x4 matrix keyboard
+#include <U8g2lib.h> //library for controlling the OLED screen
+#include <HX711.h> //used for interacting with the ADC (analog to digital converters) HX711 boards that read the load cells
+#include <Servo.h> //used for controlling the ESC, which is a servo
 #include <avr/wdt.h> //watchdog for resetting the test if there's a hardware failure
 #include <EEPROM.h> //eeprom stores the thrust and torque calibrations
 #include <SPI.h> //used for the Spi needed for the SD card
@@ -11,11 +10,7 @@
 
 /*TODO: 
 Thrust Profiles
-STD Dev of Sensors Calculations
-Airspeed
-Airspeed overwrite
-SD Card Reading
-EEPROM Calibration Saving
+Pre-test info screen
 RPM Verification
 */
 
@@ -101,13 +96,12 @@ const float averageCount = 40; //this controls how many averages the reading wil
 ////////////////////////////////////////////////////////////////////////////////////////
 //RPM Config
 
-const byte rpmPin = 2;                  // Interrupt pin
-const unsigned long window_ms = 250;    // RPM update window
+const byte rpmPin = 2; // Interrupt pin
 long pulsesPerRev = 1; //number of markers
 
 volatile unsigned long pulses;
 long lastRpmReadTime = 0;
-long rpmUpdateRate = 250; //update rate of rpm reading in ms
+long rpmUpdateRate = 500; //update rate of rpm reading in ms
 
 //interrupt service routine
 void rpmISR() {
@@ -673,15 +667,15 @@ void zeroAnalog(){
 }
 
 int getRPM() { //returns RPM. Updates once per rpm update ms
-    long period = millis() - lastRpmReadTime;
 
-    if (period < rpmUpdateRate) {
+    if ((millis() - lastRpmReadTime) < rpmUpdateRate) {
         Serial.println("RPM not ready");
         return RPM;
     }
 
     //grab RPM from sensor, and reset the time before the count starts again.
-    noInterrupts();
+    noInterrupts(); //stop reading RPMS here, so that the count corresponds to the period
+    long period = millis() - lastRpmReadTime; //mark the amount of time since the last read
     long pulseCount = pulses;
     pulses = 0;
     lastRpmReadTime = millis();
