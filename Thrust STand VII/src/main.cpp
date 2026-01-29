@@ -10,6 +10,7 @@
 
 /*TODO: 
 Thrust Profiles
+Drag Taring Menu
 Pre-test info screen
 RPM Verification
 */
@@ -40,7 +41,7 @@ float airspeed = 0; //m/s
 float current = 0; //amps
 float voltage = 0; //volts
 int RPM = 0;
-int throttle = 0;
+float throttle = 0;
 
 //Calculated Variables
 float electricPower = 0; //watts
@@ -668,7 +669,7 @@ void zeroAnalog(){
 
 int getRPM() { //returns RPM. Updates once per rpm update ms
 
-    if ((millis() - lastRpmReadTime) < rpmUpdateRate) {
+    if ((unsigned long)(millis() - lastRpmReadTime) <= (unsigned long)rpmUpdateRate) { //cast to unsigned to shut up compiler
         Serial.println("RPM not ready");
         return RPM;
     }
@@ -680,12 +681,8 @@ int getRPM() { //returns RPM. Updates once per rpm update ms
     pulses = 0;
     lastRpmReadTime = millis();
     interrupts();
-
-    if (pulseCount == 0) { //this protects against a divide by zero
-        return 0;
-    }
    
-    return (pulseCount*60000)/period;
+    return (float)(pulseCount*60000.0)/(period*2.0); //return a float. The multiplication of 2 of the period is because pulses are counted on rising and falling.
 }
 
 
@@ -897,7 +894,7 @@ void writeSensorSD(){
     dataFile.print(thrust, 3);              dataFile.print(','); // float
     dataFile.print(RPM);                    dataFile.print(','); // int
     dataFile.print(airspeed, 3);            dataFile.print(','); // float
-    dataFile.print(throttle);               dataFile.print(','); // int
+    dataFile.print(throttle, 1);            dataFile.print(','); // float
     dataFile.print(electricPower, 3);       dataFile.print(','); // float
     dataFile.print(mechanicalPower, 3);     dataFile.print(','); // float
     dataFile.print(propellerPower, 3);      dataFile.print(','); // float
@@ -910,6 +907,8 @@ void writeSensorSD(){
         dataFile.flush();
         lastFlush = millis();
         Serial.println("Flushed Data");
+    } else {
+        Serial.println("Didn't flush");
     }
     return;
 }
@@ -917,7 +916,7 @@ void writeSensorSD(){
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //TEST FUNCTIONS
 
-void setThrottle(int throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
+void setThrottle(float throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
     int throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
 
     if (throttleSetting > 100 || throttleSetting < 0){ //if the throttle is out of bounds, set it to 0
@@ -942,7 +941,7 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
     
     //initialize the test variables
     bool testRunning = true;
-    throttle = 0;
+    throttle = 0.0;
     long startTime = millis(); //this is for keeping track of what throttle level to set
     long time = startTime;
     testStartTime = millis()/1000; //this is for recording time to the SD card in seconds
@@ -954,14 +953,14 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
         //throttle mapping
         if (time < rampTime*1000){ //if time is in initial ramp up period
             Serial.println(time/1000);
-            throttle = testThrottleMax*(time/(rampTime))/1000; 
+            throttle = testThrottleMax*((float)time/(float)(rampTime))/1000; //cast to float to ensure SMOOOOOOOTH throttle
 
         } else if ((time >= rampTime*1000) & (time < (rampTime + topTime)*1000)){ //if time is at the top
-            throttle = testThrottleMax;
+            throttle = (float)testThrottleMax;
 
         } else if (time >= (rampTime + topTime)*1000){ //if time is past the top
-            long timeAfterRampDown = time-((rampTime + topTime) * 1000); //timeAfterRampDown is in millis
-            throttle = testThrottleMax - testThrottleMax * (timeAfterRampDown/(rampTime))/1000;
+            float timeAfterRampDown = (float)time-(((float)rampTime + (float)topTime) * 1000); //timeAfterRampDown is in millis
+            throttle = (float)testThrottleMax - (float)testThrottleMax * (timeAfterRampDown/((float)rampTime))/1000;
             Serial.print("Ramp Down: "); Serial.println(throttle);
         }
 
@@ -1007,7 +1006,7 @@ void setup() {
     Serial.println("Keypad Ready");
 
     drawLoadingScreen(0, "Attaching pins");
-    attachInterrupt(digitalPinToInterrupt(rpmPin), rpmISR, RISING); //attach RPM pin
+    attachInterrupt(digitalPinToInterrupt(rpmPin), rpmISR, CHANGE); //attach RPM pin
     esc.attach(ESC_PIN);
     esc.writeMicroseconds(MIN_THROTTLE);
 
