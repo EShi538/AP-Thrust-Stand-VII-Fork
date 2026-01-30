@@ -22,6 +22,7 @@ const char* Version = "Version 1.1";
 extern void debugMenu();
 extern void runTest();
 extern void zeroAnalog();
+extern void selectProfile();
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //EEPROM Variables
@@ -133,6 +134,7 @@ const int ESC_PIN = 3;
 #define USER_NOTIF_DELAY 1800
 
 long testNumber = 1;
+short testType = 1; //1 = normal test (default), 2 = piecewise test with pausing
 
 //smooth ramp
 long rampTime = 15; //in seconds
@@ -230,7 +232,7 @@ MenuItem menus[] = {
     {1, "Run Test", TYPE_ACTION, 0, NULL, runTest},
     
     {2, "Configure Test", TYPE_SUBMENU, 0, NULL, NULL},
-        {21, "Select Profile", TYPE_ACTION, 2, NULL, NULL},
+        {21, "Select Profile", TYPE_ACTION, 2, NULL, selectProfile}, //page to select type of test to run
         {22, "Configure Profiles", TYPE_SUBMENU, 2, NULL, NULL},
             {221, "Smooth", TYPE_SUBMENU, 22, NULL, NULL},
                 {2211, "Ramp Up Time (s)", TYPE_VALUE, 221, &rampTime, NULL},
@@ -452,7 +454,6 @@ void drawLoadingScreen(int loadPercent, const char* message){//pass load percent
     u8g2.drawStr(2, 56, message);
 
     u8g2.sendBuffer();
-
 }
 
 
@@ -746,6 +747,78 @@ void readSensorData(){ //call to update all of the sensor data to match most rec
  
 }
 
+void pauseScreen(){//call to display the pause screen to prompt the user to either continue testing or end test
+    u8g2.clearBuffer();
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(2, 9, "Test Paused...");
+
+    u8g2.drawLine(0, 12, 128, 12);
+
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(8, 32, "Continue Test: Press #");
+
+    u8g2.drawStr(33, 52, "End Test: Press *");
+
+    u8g2.sendBuffer();
+}
+
+void promptPropSwap(){ //prompt to tell user to unplug motor and swap props
+    u8g2.clearBuffer();
+
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(32, 15, "UNPLUG MOTOR!");
+
+    u8g2.drawStr(26, 31, "Swap Propellers");
+
+    u8g2.drawLine(17, 3, 6, 19);
+
+    u8g2.drawLine(6, 19, 27, 19);
+
+    u8g2.drawLine(28, 19, 17, 3);
+
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(108, 17, "!");
+
+    u8g2.drawStr(15, 17, "!");
+
+    u8g2.drawLine(121, 19, 110, 3);
+
+    u8g2.drawLine(99, 19, 120, 19);
+
+    u8g2.drawLine(110, 3, 99, 19);
+
+    u8g2.drawLine(99, 19, 120, 19);
+
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(4, 46, "Press * to Continue Test");
+
+    u8g2.drawStr(16, 58, "Press # to End Test");
+
+    u8g2.drawLine(0, 34, 127, 34);
+
+    u8g2.sendBuffer();
+}
+
+void promptPlugInMotor(){ //Prompt the user to plug motor back in after prop has been put on
+    u8g2.clearBuffer();
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(33, 14, "Plug in Motor");
+
+    u8g2.drawStr(4, 35, "Press * to Continue Test");
+
+    u8g2.drawStr(18, 53, "Press # to End Test");
+
+    u8g2.drawLine(127, 17, 0, 17);
+
+    u8g2.sendBuffer();
+}
+
 void displaySensorData(){//call to display all relevant test data. Needs to be passed current thrust
     u8g2.clearBuffer(); //prepare the screen for writing
     u8g2.setFont(u8g2_font_6x12_tr);
@@ -807,7 +880,6 @@ void debugMenu() {
         }
     }
 }
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //SD CARD FUNCTIONS
@@ -916,6 +988,42 @@ void writeSensorSD(){
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //TEST FUNCTIONS
 
+void selectProfile(){
+    u8g2.clearBuffer();
+    u8g2.setFontMode(1);
+    u8g2.setBitmapMode(1);
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(17, 12, "Select Test Profile");
+
+    u8g2.setFont(u8g2_font_5x7_tr);
+    u8g2.drawStr(1, 26, "1 - Smooth Ramp Up");
+
+    u8g2.drawStr(2, 41, "2 - Intervals Ramp Up");
+
+    u8g2.drawStr(2, 56, "3 - Motor Profile Testing");
+
+    u8g2.drawLine(0, 14, 127, 14);
+
+    u8g2.sendBuffer();
+
+    while(1){
+        char userInput = customKeypad.getKey();
+        if(userInput){
+            Serial.println(userInput);
+            if(userInput == '1'){ //Smooth ramp 
+                testType = 1;
+            }
+            else if(userInput == '2'){ //Intervals
+                testType = 2;
+            }
+            else if(userInput == '3'){ //motor testing
+                testType = 3;
+            }   
+        }
+    }
+}
+
+//helper method
 void setThrottle(float throttleSetting){ //pass this a throttle from 0-100 and it will safely write it to the ESC
     int throttleMicroseconds = ((throttleSetting/100.0)*(MAX_THROTTLE-MIN_THROTTLE)+MIN_THROTTLE);
 
@@ -927,18 +1035,8 @@ void setThrottle(float throttleSetting){ //pass this a throttle from 0-100 and i
     Serial.print("Throttle Microseconds: "); Serial.println(throttleMicroseconds);
 }
 
-void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
-    esc.writeMicroseconds(MIN_THROTTLE);
-
-    if(!setUpTest()){
-        return;
-    }
-
-    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
-    wdt_reset();
-
-    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
-    
+//This helper method does the motor control and ramps up the motor smoothly in intervals, pausing at each interval. 
+void smoothRamp(){
     //initialize the test variables
     bool testRunning = true;
     throttle = 0.0;
@@ -983,8 +1081,95 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
             setThrottle(0);
             testRunning = false;
         }
+    } 
+}
 
+void runPiecewiseTest(){
+    esc.writeMicroseconds(MIN_THROTTLE);
+
+    if(!setUpTest()){
+        return;
     }
+
+    wdt_enable(WDTO_2S);
+    wdt_reset();
+
+    resetSensorData();
+
+    bool testRunning = true;
+    while(testRunning){
+        smoothRamp(); //TODO: CHANGE TO INTERVAL RAMP PROFILE AFTER MERGING
+
+        throttle = 0;
+        setThrottle(0);
+        wdt_disable();
+
+        pauseScreen(); 
+        while(testRunning){ //prompt user to continue/end test
+            char userInput = customKeypad.getKey();
+            if(userInput){
+                Serial.println(userInput);
+                if(userInput == '*'){ //continue test
+                    break;
+                }
+                else if(userInput == '#'){ //end test
+                    testRunning = false; //break out of the main testing loop 
+                    break;
+                }
+            }
+        }
+
+        promptPropSwap();
+        while(testRunning){ //prompt user to unplug motor, swap props, and continue/end test
+            char userInput = customKeypad.getKey();
+            if(userInput){
+                Serial.println(userInput);
+                if(userInput == '*'){ //continue test
+                    break;
+                }
+                else if(userInput == '#'){ //end test
+                    testRunning = false; //break out of the main testing loop 
+                    break;
+                }
+            }
+        }
+
+        promptPlugInMotor();
+        while(testRunning){ //prompt user to plug in motor and continue/end test
+            char userInput = customKeypad.getKey();
+            if(userInput){
+                Serial.println(userInput);
+                if(userInput == '*'){ //continue test
+                    break;
+                }
+                else if(userInput == '#'){ //end test
+                    testRunning = false; //break out of the main testing loop 
+                    break;
+                }
+            }
+        }
+    }
+
+    throttle = 0;
+    setThrottle(0);
+    testNumber++;
+    dataFile.close();
+    wdt_disable();
+}
+
+void runSmoothRampTest(){ //give time in millis since starting the test, returns a struct containing info about throttle settings and whether to record data
+    esc.writeMicroseconds(MIN_THROTTLE);
+
+    if(!setUpTest()){
+        return;
+    }
+
+    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
+    wdt_reset();
+
+    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
+    
+    smoothRamp();  //start up the motor and do the thing
 
     throttle = 0;
     setThrottle(0);
@@ -994,7 +1179,15 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
 }
 
 void runTest(){//this method is in charge of deciding which test to run and then running it
-    runSmoothRampTest();
+    if(testType == 1){ //run smooth ramp test
+        runSmoothRampTest();
+    }
+    else if(testType == 2){
+        //TODO: RUN INTERVAL TEST (CALL THE FUNCTION)
+    }
+    else if(testType == 3){ //run piecewise test
+        runPiecewiseTest();
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1042,8 +1235,6 @@ void setup() {
     EEPROM.get(THST_CAL_ADDRESS, thrustSensorScale); 
     Serial.println(thrustSensorScale);
     thrustSensor.set_scale(thrustSensorScale);
-
-
 }
 
 //loop draws a menu and allows for navigation. Once something is selected, it does that function, then continues looping. 
