@@ -1040,6 +1040,8 @@ void runSteppedRampTest(){
         throttle = targetThrottle;
         setThrottle(throttle); //snug up the throttle to the exact float percentage required
 
+        delay(400); //wait for RPM to stabilize. NOTE: E-STOP does not work during this time period
+        
         //record data at that throttle setting once the throttle is in the right spot
         unsigned long stepStartTime = millis();
         while(testRunning && millis() - stepStartTime <= (unsigned long)intervalTime * 1000){ 
