@@ -143,6 +143,7 @@ bool upDown = true; //if true, go up and then back down
 //step ramp
 long intervalCount = 8;
 long intervalTime = 4;
+long rampSettleTime = 1000;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //KEYBOARD SETUP
@@ -244,6 +245,7 @@ MenuItem menus[] = {
                 {2221, "Interval Amount", TYPE_VALUE, 222, &intervalCount},
                 {2222, "Interval Time", TYPE_VALUE, 222, &intervalTime},
                 {2223, "Max Throttle (0-100%)", TYPE_VALUE, 222, &testThrottleMax, NULL},
+                {2224, "Ramp Settle Time (ms)", TYPE_VALUE, 222, &rampSettleTime, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
             {232, "RPM Update Rate (ms)", TYPE_VALUE, 23, &rpmUpdateRate, NULL},
@@ -1040,8 +1042,22 @@ void runSteppedRampTest(){
         throttle = targetThrottle;
         setThrottle(throttle); //snug up the throttle to the exact float percentage required
 
-        delay(400); //wait for RPM to stabilize. NOTE: E-STOP does not work during this time period
-        
+        unsigned long rampStopTime = millis();
+        while (millis() < rampStopTime + (unsigned long)rampSettleTime) { //wait one second for the propulsion system to reach equilibrium
+            readSensorData();
+            displaySensorData();
+            char userInput = customKeypad.getKey();
+            if (userInput){
+                throttle = 0;
+                setThrottle(0);
+                testRunning = false;
+                break; //exit the while loop
+            }
+            Serial.println("Allowing settle time");
+            wdt_reset();
+        }
+
+        wdt_reset();
         //record data at that throttle setting once the throttle is in the right spot
         unsigned long stepStartTime = millis();
         while(testRunning && millis() - stepStartTime <= (unsigned long)intervalTime * 1000){ 
