@@ -123,8 +123,8 @@ float zeroVoltage = 2.7;    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOU
 //(For a HARGRAVE MICRODRIVE ESC, accepted PWM frequencies range from 50Hz to 499 Hz
 
 Servo esc; 
-const int MIN_THROTTLE = 950;
-const int MAX_THROTTLE = 2000;
+const int MIN_THROTTLE = 1050;
+const int MAX_THROTTLE = 1950;
 const int ESC_PIN = 3;
 
 //-----------------------------------------GLOBAL VARIABLES-----------------------------------
