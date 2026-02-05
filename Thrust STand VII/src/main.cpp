@@ -1002,6 +1002,7 @@ void writeSensorSD(){
 
 void selectProfile(){
     u8g2.clearBuffer();
+
     u8g2.setFontMode(1);
     u8g2.setBitmapMode(1);
     u8g2.setFont(u8g2_font_5x8_tr);
@@ -1010,11 +1011,13 @@ void selectProfile(){
     u8g2.setFont(u8g2_font_5x7_tr);
     u8g2.drawStr(1, 26, "1 - Smooth Ramp Up");
 
-    u8g2.drawStr(2, 41, "2 - Intervals Ramp Up");
+    u8g2.drawStr(2, 37, "2 - Intervals Ramp Up");
 
-    u8g2.drawStr(2, 56, "3 - Motor Profile Testing");
+    u8g2.drawStr(2, 48, "3 - Motor Profile Testing");
 
     u8g2.drawLine(0, 14, 127, 14);
+
+    u8g2.drawStr(2, 59, "4 - Battery Load Testing");
 
     u8g2.sendBuffer();
 
@@ -1031,6 +1034,9 @@ void selectProfile(){
             else if(userInput == '3'){ //motor testing
                 testType = 3;
             }   
+            else if(userInput == '4'){ //battery testing
+                testType = 4;
+            }
         }
     }
 }
@@ -1279,15 +1285,23 @@ void runSteppedRampTest(){
     dataFile.close();
     wdt_disable(); //turn off the watch dog
 }
+
+void runBatteryTest(){
+
+}
+
 void runTest(){//this method is in charge of deciding which test to run and then running it
     if(testType == 1){ //run smooth ramp test
         runSmoothRampTest();
     }
     else if(testType == 2){
-        //TODO: RUN INTERVAL TEST (CALL THE FUNCTION)
+        runSteppedRampTest();
     }
     else if(testType == 3){ //run piecewise test
         runPiecewiseTest();
+    }
+    else if(testType == 4){
+        runBatteryTest();
     }
 }
 
