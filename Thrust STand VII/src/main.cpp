@@ -41,7 +41,7 @@ float torque = 0; //N.mm
 float airspeed = 0; //m/s
 float current = 0; //amps
 float voltage = 0; //volts
-int RPM = 0;
+float RPM = 0;
 float throttle = 0;
 
 //Calculated Variables
@@ -99,11 +99,11 @@ const float averageCount = 40; //this controls how many averages the reading wil
 //RPM Config
 
 const byte rpmPin = 2; // Interrupt pin
-long pulsesPerRev = 1; //number of markers
+long pulsesPerRev = 4; //number of markers
 
 volatile unsigned long pulses;
 long lastRpmReadTime = 0;
-long rpmUpdateRate = 500; //update rate of rpm reading in ms
+long rpmUpdateRate = 250; //update rate of rpm reading in ms
 
 //interrupt service routine
 void rpmISR() {
@@ -124,8 +124,8 @@ float zeroVoltage = 2.7;    // MODIFY THIS VALUE TO CORRESPOND TO VOLTAGE WITHOU
 //(For a HARGRAVE MICRODRIVE ESC, accepted PWM frequencies range from 50Hz to 499 Hz
 
 Servo esc; 
-const int MIN_THROTTLE = 950;
-const int MAX_THROTTLE = 2000;
+const int MIN_THROTTLE = 1050;
+const int MAX_THROTTLE = 1950;
 const int ESC_PIN = 3;
 
 //-----------------------------------------GLOBAL VARIABLES-----------------------------------
@@ -141,6 +141,11 @@ long rampTime = 15; //in seconds
 long topTime = 4; //in seconds
 long testThrottleMax = 100; //as a percent
 bool upDown = true; //if true, go up and then back down
+
+//step ramp
+long intervalCount = 8;
+long intervalTime = 4;
+long rampSettleTime = 1000;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //KEYBOARD SETUP
@@ -239,6 +244,10 @@ MenuItem menus[] = {
                 {2212, "Top Hold Time (s)", TYPE_VALUE, 221, &topTime, NULL},
                 {2213, "Max Throttle (0-100%)", TYPE_VALUE, 221, &testThrottleMax, NULL},
             {222, "Intervals", TYPE_SUBMENU, 22, NULL, NULL},
+                {2221, "Interval Amount", TYPE_VALUE, 222, &intervalCount},
+                {2222, "Interval Time", TYPE_VALUE, 222, &intervalTime},
+                {2223, "Max Throttle (0-100%)", TYPE_VALUE, 222, &testThrottleMax, NULL},
+                {2224, "Ramp Settle Time (ms)", TYPE_VALUE, 222, &rampSettleTime, NULL},
         {23, "Configure Hardware", TYPE_SUBMENU, 2, NULL, NULL},
             {231, "RPM Marker Count", TYPE_VALUE, 23, &pulsesPerRev, NULL},
             {232, "RPM Update Rate (ms)", TYPE_VALUE, 23, &rpmUpdateRate, NULL},
@@ -683,7 +692,7 @@ int getRPM() { //returns RPM. Updates once per rpm update ms
     lastRpmReadTime = millis();
     interrupts();
    
-    return (float)(pulseCount*60000.0)/(period*2.0); //return a float. The multiplication of 2 of the period is because pulses are counted on rising and falling.
+    return (float)(pulseCount*60000.0)/(period*2.0*pulsesPerRev); //return a float. The multiplication of 2 of the period is because pulses are counted on rising and falling.
 }
 
 
@@ -884,6 +893,8 @@ void debugMenu() {
 //////////////////////////////////////////////////////////////////////////////////////////////////
 //SD CARD FUNCTIONS
 bool setUpTest(){//call this function to set up the file with the correct headers. Returns true on a successful setup. Also prompts the user to initiate the test. Begin the test right after a succesful call.
+    esc.writeMicroseconds(MIN_THROTTLE); //set throttle to zero
+
     //ask user for test file
     valueEditMenu(&testNumber, "Enter Test Number");
 
@@ -952,6 +963,7 @@ bool setUpTest(){//call this function to set up the file with the correct header
             return false; //if user picks cancel, then return false.
         }
     }
+    resetSensorData(); //this line makes sure that if a sensor is missing, it shows as zero and not the value of the last test
     return true; //true means it was successful
 }
 
@@ -964,7 +976,7 @@ void writeSensorSD(){
     dataFile.print(voltage, 3);             dataFile.print(','); // float
     dataFile.print(torque, 3);              dataFile.print(','); // float
     dataFile.print(thrust, 3);              dataFile.print(','); // float
-    dataFile.print(RPM);                    dataFile.print(','); // int
+    dataFile.print(RPM, 1);                    dataFile.print(','); // int
     dataFile.print(airspeed, 3);            dataFile.print(','); // float
     dataFile.print(throttle, 1);            dataFile.print(','); // float
     dataFile.print(electricPower, 3);       dataFile.print(','); // float
@@ -1178,6 +1190,95 @@ void runSmoothRampTest(){ //give time in millis since starting the test, returns
     wdt_disable(); //turn off the watch dog
 }
 
+void runSteppedRampTest(){
+    if(!setUpTest()){
+        return;
+    }
+
+    wdt_enable(WDTO_2S); //this is the watchdog timer. If it goes 2s without wdt_reset being called, the board will do a hardware reset.
+    wdt_reset();
+    
+    //initialize the test variables
+    bool testRunning = true;
+    throttle = 0.0;
+    float throttleStep = testThrottleMax/(float)intervalCount;
+
+    for (int i = 1; i <= intervalCount; i++) {
+
+        float targetThrottle = i*throttleStep;
+
+        //slew throttle to next throttle setting by advancing at a maximum speed of 20% per second
+        while (testRunning && throttle <= targetThrottle-1){
+            throttle = throttle+1;
+            setThrottle(throttle);
+
+            readSensorData();
+            displaySensorData();
+
+            //check for any user input, cancel test if they pressed anything
+            char userInput = customKeypad.getKey();
+            if (userInput){
+                throttle = 0;
+                setThrottle(0);
+                testRunning = false;
+                break; //exit the while loop
+            }
+
+            wdt_reset(); //pet the dogS
+            delay(50);
+        }
+
+        throttle = targetThrottle;
+        setThrottle(throttle); //snug up the throttle to the exact float percentage required
+
+        unsigned long rampStopTime = millis();
+        while (millis() < rampStopTime + (unsigned long)rampSettleTime) { //wait one second for the propulsion system to reach equilibrium
+            readSensorData();
+            displaySensorData();
+            char userInput = customKeypad.getKey();
+            if (userInput){
+                throttle = 0;
+                setThrottle(0);
+                testRunning = false;
+                break; //exit the while loop
+            }
+            Serial.println("Allowing settle time");
+            wdt_reset();
+        }
+
+        wdt_reset();
+        //record data at that throttle setting once the throttle is in the right spot
+        unsigned long stepStartTime = millis();
+        while(testRunning && millis() - stepStartTime <= (unsigned long)intervalTime * 1000){ 
+            wdt_reset();
+
+            readSensorData();
+            displaySensorData();
+            writeSensorSD();
+
+            //check for any user input, cancel test if they pressed anything
+            char userInput = customKeypad.getKey();
+            if (userInput){
+                throttle = 0;
+                setThrottle(0);
+                testRunning = false;
+                break; //exit the while loop
+            }
+        }
+        //once the step is complete, resets to top of for loop and repeats the process.
+
+        if (!testRunning){ //if the user cancels and breaks out of the while loop, break them out of the for loop too
+            break;
+        }
+    }
+
+    //end the test once all steps have been done
+    throttle = 0;
+    setThrottle(0);
+    testNumber++;
+    dataFile.close();
+    wdt_disable(); //turn off the watch dog
+}
 void runTest(){//this method is in charge of deciding which test to run and then running it
     if(testType == 1){ //run smooth ramp test
         runSmoothRampTest();
